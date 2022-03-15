@@ -1,0 +1,93 @@
+<html>
+
+<head>
+  <style>
+    #drop {
+      width: 100%;
+      height: 50%;
+      background-color: aquamarine;
+    }
+
+    #drop p {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      font-size: 5em;
+    }
+
+    #results {
+      width: 100%;
+      height: 50%;
+      background-color: bisque;
+    }
+
+    canvas {
+      image-rendering: pixelated;
+      image-rendering: -moz-crisp-edges;
+      image-rendering: crisp-edges;
+    }
+  </style>
+  <script>
+    function handleDrop(event) {
+      event.preventDefault();
+      if (event.dataTransfer.items) {
+        for (let i = 0; i < event.dataTransfer.items.length; i++) {
+          if (event.dataTransfer.items[i].kind === 'file') {
+            const file = event.dataTransfer.items[i].getAsFile();
+            //const canvas = document.createElement("canvas");
+            const canvas = document.getElementById("canvas");
+            const results = document.getElementById("results");
+            const ctx = canvas.getContext('2d');
+            createImageBitmap(file).then(v => {
+              ctx.drawImage(v, 0, 0);
+              const data = ctx.getImageData(0, 0, v.width, v.height);
+              const set = new Set();
+              for (let i = 0; i < data.data.length; i += 4) {
+                const r = data.data[i];
+                const g = data.data[i + 1];
+                const b = data.data[i + 2];
+                const a = data.data[i + 3];
+                const z = (a << 0) + (b << 8) + (g << 16) + (r << 24);
+                set.add(z);
+              }
+
+              const canvas2 = document.createElement("canvas");
+              canvas2.width = set.size;
+              canvas2.height = 1;
+              canvas2.style.transform = "scale(20, 20)";
+              canvas2.style.transformOrigin = "top left";
+              const ctx2 = canvas2.getContext("2d");
+              let i = 0;
+              console.log("----");
+              for (let e of set.entries()) {
+                const z = e[0]; // entries() returns [value, value]
+                const r = (z >> 24) & 0xFF;
+                const g = (z >> 16) & 0xFF;
+                const b = (z >> 8) & 0xFF;
+                const a = (z >> 0) & 0xFF;
+                const rgba = `rgba(${r},${g},${b},${a / 255})`;
+                console.log(rgba);
+                ctx2.fillStyle = rgba;
+                ctx2.fillRect(i, 0, 1, 1);
+                i += 1;
+              }
+              results.appendChild(canvas2);
+            });
+          }
+        }
+      };
+    };
+
+    function handleDragOver(event) {
+      event.preventDefault();
+    };
+  </script>
+</head>
+
+<body>
+  <div id="drop" ondrop="handleDrop(event)" ondragover="handleDragOver(event)">
+    <p>Drop a file here!</p>
+    <canvas id="canvas"></canvas>
+  </div>
+  <div id="results"></div>
+</body>
+
+</html>
