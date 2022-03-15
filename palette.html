@@ -1,6 +1,7 @@
 <html>
 
 <head>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
   <style>
     #drop {
       width: 100%;
@@ -28,6 +29,15 @@
   <script>
     function handleDrop(event) {
       event.preventDefault();
+
+      let interleave1 = x => {
+        x = (x | (x << 16)) & 0x030000FF;
+        x = (x | (x <<  8)) & 0x0300F00F;
+        x = (x | (x <<  4)) & 0x030C30C3;
+        x = (x | (x <<  2)) & 0x09249249;
+        return x;
+      };
+
       if (event.dataTransfer.items) {
         for (let i = 0; i < event.dataTransfer.items.length; i++) {
           if (event.dataTransfer.items[i].kind === 'file') {
@@ -55,10 +65,28 @@
               canvas2.style.transform = "scale(20, 20)";
               canvas2.style.transformOrigin = "top left";
               const ctx2 = canvas2.getContext("2d");
-              let i = 0;
               console.log("----");
+
+              // convert our Set to an array of numbers. Not strictly needed but makes stuff further down a little easier
+              let values = [];
               for (let e of set.entries()) {
-                const z = e[0]; // entries() returns [value, value]
+                values.push(e[0]); // entries() returns [value, value]
+              }
+
+              // Sort the array via a z-order curve, by interleaving the bits. Similar to https://www.forceflow.be/2013/10/07/morton-encodingdecoding-through-bit-interleaving-implementations/
+              // see also interleave1() function above
+              // we ignore the alpha channel as it's often the same anways :shrug:
+              values = _.sortBy(values, [(z) => {
+                const r = interleave1((z >> 24) & 0xFF);
+                const g = interleave1((z >> 16) & 0xFF);
+                const b = interleave1((z >> 8) & 0xFF);
+
+                return r | (g << 1) | (b << 2);
+              }]);
+
+              // Generate our output palette canvas!
+              let i = 0;
+              values.forEach(z => {
                 const r = (z >> 24) & 0xFF;
                 const g = (z >> 16) & 0xFF;
                 const b = (z >> 8) & 0xFF;
@@ -68,7 +96,9 @@
                 ctx2.fillStyle = rgba;
                 ctx2.fillRect(i, 0, 1, 1);
                 i += 1;
-              }
+              });
+
+              // Add the palette canvas to the DOM to allow rightclick -> save as
               results.appendChild(canvas2);
             });
           }
