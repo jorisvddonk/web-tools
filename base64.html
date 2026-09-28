@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>base64 encoder / decoder</title>
+  <meta name="description" content="Encode text to base64 and decode base64 back to text, entirely in your browser. Unicode-safe.">
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: #f7f6f3;
+      color: #1d1c1a;
+      line-height: 1.5;
+    }
+    main { max-width: 760px; margin: 0 auto; padding: 2.5rem 1.5rem 4rem; }
+    h1 { font-size: 1.7rem; margin: 0 0 0.25rem; }
+    .subtitle { color: #6b6a66; margin: 0 0 1.5rem; }
+    .back { display: inline-block; margin-bottom: 1.5rem; color: #7c4dff; text-decoration: none; font-size: 0.9rem; }
+    label { display: block; font-weight: 600; font-size: 0.9rem; margin: 1rem 0 0.35rem; }
+    textarea {
+      width: 100%;
+      min-height: 9em;
+      padding: 0.7rem 0.8rem;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.9rem;
+      border: 1px solid #e5e3de;
+      border-radius: 8px;
+      background: #fff;
+      resize: vertical;
+    }
+    textarea[readonly] { background: #f1efe9; }
+    .row { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.75rem; align-items: center; }
+    button {
+      border: 1px solid #7c4dff;
+      border-radius: 8px;
+      background: #7c4dff;
+      color: #fff;
+      font-size: 0.9rem;
+      font-weight: 600;
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+    }
+    button.secondary { background: #fff; color: #1d1c1a; border-color: #e5e3de; }
+    button:active { transform: scale(0.97); }
+    .opts { display: flex; gap: 1rem; margin-top: 0.75rem; font-size: 0.85rem; color: #6b6a66; }
+    .opts label { font-weight: 400; margin: 0; display: flex; gap: 0.35rem; align-items: center; }
+    .error { color: #b00020; font-size: 0.9rem; min-height: 1.4em; margin-top: 0.5rem; }
+    .stats { color: #6b6a66; font-size: 0.8rem; margin-top: 0.25rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>base64 encoder / decoder</h1>
+    <p class="subtitle">Everything runs locally in your browser. Unicode-safe.</p>
+
+    <label for="input">Input</label>
+    <textarea id="input" placeholder="Type or paste text (to encode) or base64 (to decode) here&hellip;" spellcheck="false"></textarea>
+
+    <div class="row">
+      <button id="encodeBtn" type="button">Encode &darr;</button>
+      <button id="decodeBtn" type="button">Decode &uarr;</button>
+      <button id="swapBtn" type="button" class="secondary" title="Move the output back into the input">Swap</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+    </div>
+    <div class="opts">
+      <label><input type="checkbox" id="liveChk" checked> Convert live</label>
+      <label><input type="checkbox" id="urlSafeChk"> URL-safe alphabet</label>
+    </div>
+
+    <div class="error" id="error" role="alert"></div>
+
+    <label for="output">Output</label>
+    <textarea id="output" readonly spellcheck="false"></textarea>
+    <div class="row">
+      <button id="copyBtn" type="button" class="secondary">Copy output</button>
+    </div>
+    <div class="stats" id="stats"></div>
+  </main>
+
+  <script>
+    "use strict";
+    var input = document.getElementById("input");
+    var output = document.getElementById("output");
+    var errorEl = document.getElementById("error");
+    var statsEl = document.getElementById("stats");
+    var liveChk = document.getElementById("liveChk");
+    var urlSafeChk = document.getElementById("urlSafeChk");
+    var mode = "encode"; // or "decode"
+
+    function bytesToBase64(bytes) {
+      var s = "";
+      var CHUNK = 32768;
+      for (var i = 0; i < bytes.length; i += CHUNK) {
+        s += String.fromCharCode.apply(null, bytes.subarray(i, i + CHUNK));
+      }
+      return btoa(s);
+    }
+
+    function base64ToBytes(b64) {
+      var bin = atob(b64);
+      var bytes = new Uint8Array(bin.length);
+      for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      return bytes;
+    }
+
+    function encodeText(str) {
+      var out = bytesToBase64(new TextEncoder().encode(str));
+      if (urlSafeChk.checked) {
+        out = out.replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+      }
+      return out;
+    }
+
+    function decodeText(b64) {
+      var s = b64.trim().replace(/\s+/g, "");
+      if (urlSafeChk.checked) {
+        s = s.replace(/-/g, "+").replace(/_/g, "/");
+      }
+      if (!/^[A-Za-z0-9+/]*={0,2}$/.test(s) || s.length % 4 === 1) {
+        throw new Error("That does not look like valid base64.");
+      }
+      while (s.length % 4 !== 0) s += "=";
+      return new TextDecoder("utf-8", { fatal: true }).decode(base64ToBytes(s));
+    }
+
+    function convert(which) {
+      mode = which || mode;
+      errorEl.textContent = "";
+      try {
+        var result = mode === "encode" ? encodeText(input.value) : decodeText(input.value);
+        output.value = result;
+      } catch (e) {
+        output.value = "";
+        errorEl.textContent = e && e.message ? e.message : String(e);
+      }
+      updateStats();
+    }
+
+    function updateStats() {
+      var inBytes = 0;
+      try { inBytes = new TextEncoder().encode(input.value).length; } catch (e) { /* ignore */ }
+      statsEl.textContent =
+        "input: " + input.value.length + " chars / " + inBytes + " bytes" +
+        "  ·  output: " + output.value.length + " chars";
+    }
+
+    document.getElementById("encodeBtn").addEventListener("click", function () { convert("encode"); });
+    document.getElementById("decodeBtn").addEventListener("click", function () { convert("decode"); });
+    document.getElementById("swapBtn").addEventListener("click", function () {
+      input.value = output.value;
+      output.value = "";
+      errorEl.textContent = "";
+      updateStats();
+      input.focus();
+    });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      input.value = "";
+      output.value = "";
+      errorEl.textContent = "";
+      updateStats();
+      input.focus();
+    });
+    document.getElementById("copyBtn").addEventListener("click", function () {
+      var btn = this;
+      var done = function () {
+        btn.textContent = "Copied!";
+        setTimeout(function () { btn.textContent = "Copy output"; }, 1200);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(output.value).then(done, function () {
+          output.select();
+          document.execCommand("copy");
+          done();
+        });
+      } else {
+        output.select();
+        document.execCommand("copy");
+        done();
+      }
+    });
+    input.addEventListener("input", function () {
+      if (liveChk.checked) convert();
+      else updateStats();
+    });
+    urlSafeChk.addEventListener("change", function () { convert(); });
+
+    updateStats();
+  </script>
+</body>
+</html>
