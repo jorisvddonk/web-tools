@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>regex tester</title>
+  <meta name="description" content="Test JavaScript regular expressions live: matches, capture groups, highlights and replacement preview. Runs locally.">
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    mark.zero { background: #ffd166; padding: 0 1px; font-weight: 700; }
+    .matches-wrap { overflow-x: auto; }
+    .group-line { display: block; }
+    .group-line + .group-line { margin-top: 0.15rem; }
+    .group-name { color: #5b34d6; }
+  </style>
+</head>
+<body>
+  <main>
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>regex tester</h1>
+    <p class="subtitle">Live JavaScript regular expressions, capture groups and replace preview. Runs locally.</p>
+
+    <label for="pattern">Pattern</label>
+    <input type="text" id="pattern" placeholder="(?&lt;user&gt;[A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})" spellcheck="false" autocomplete="off">
+
+    <div class="opts">
+      <label><input type="checkbox" id="flagG" checked> g</label>
+      <label><input type="checkbox" id="flagI"> i</label>
+      <label><input type="checkbox" id="flagM"> m</label>
+      <label><input type="checkbox" id="flagS"> s</label>
+      <label><input type="checkbox" id="flagU"> u</label>
+      <label><input type="checkbox" id="flagY"> y</label>
+    </div>
+
+    <label for="test">Test string</label>
+    <textarea id="test" class="tall" placeholder="Paste the text to search here…" spellcheck="false"></textarea>
+
+    <label for="replacement">Replacement <span class="hint">(supports $1, $&amp;, $&lt;name&gt;)</span></label>
+    <input type="text" id="replacement" placeholder="$2 ($1)" spellcheck="false" autocomplete="off">
+
+    <div class="row">
+      <button id="exampleBtn" type="button" class="secondary">Load example</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+      <span class="spacer"></span>
+      <button id="copyResultBtn" type="button" class="secondary">Copy replacement result</button>
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="statusBadge" class="badge muted">waiting for input</span>
+      <span id="statusHint" class="hint"></span>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+
+    <section class="card">
+      <h2>Highlighted matches</h2>
+      <pre class="out" id="highlight"></pre>
+    </section>
+
+    <section class="card">
+      <h2>Matches</h2>
+      <div class="matches-wrap">
+        <table>
+          <thead><tr><th style="width:2.5rem">#</th><th style="width:5rem">Index</th><th>Match</th><th>Groups</th></tr></thead>
+          <tbody id="matchesBody"></tbody>
+        </table>
+      </div>
+      <div class="hint" id="matchesEmpty">No matches yet.</div>
+    </section>
+
+    <section class="card">
+      <h2>Replacement result</h2>
+      <textarea id="result" readonly spellcheck="false"></textarea>
+    </section>
+  </main>
+
+  <script>
+    "use strict";
+    var patternInput = document.getElementById("pattern");
+    var testInput = document.getElementById("test");
+    var replacementInput = document.getElementById("replacement");
+    var result = document.getElementById("result");
+    var highlight = document.getElementById("highlight");
+    var matchesBody = document.getElementById("matchesBody");
+    var matchesEmpty = document.getElementById("matchesEmpty");
+    var statusBadge = document.getElementById("statusBadge");
+    var statusHint = document.getElementById("statusHint");
+    var errorEl = document.getElementById("error");
+    var timer = null;
+
+    var MAX_LISTED = 500;
+    var MAX_MATCHES = 5000;
+
+    var EXAMPLE_PATTERN = "(?<user>[A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\\.[A-Za-z]{2,})";
+    var EXAMPLE_TEXT = "Ada <ada@example.com>, Grace <grace@navy.mil> and a broken one: nope@";
+
+    function escapeHtml(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    function selectedFlags() {
+      var flags = "";
+      if (document.getElementById("flagG").checked) flags += "g";
+      if (document.getElementById("flagI").checked) flags += "i";
+      if (document.getElementById("flagM").checked) flags += "m";
+      if (document.getElementById("flagS").checked) flags += "s";
+      if (document.getElementById("flagU").checked) flags += "u";
+      if (document.getElementById("flagY").checked) flags += "y";
+      return flags;
+    }
+
+    function collectMatches(re, text) {
+      var matches = [];
+      var global = re.global || re.sticky;
+      if (!global) {
+        var one = re.exec(text);
+        if (one) matches.push(one);
+        return matches;
+      }
+      re.lastIndex = 0;
+      var match;
+      while ((match = re.exec(text)) !== null) {
+        matches.push(match);
+        if (matches.length >= MAX_MATCHES) break;
+        if (match[0] === "") re.lastIndex++;
+        if (re.lastIndex > text.length) break;
+      }
+      re.lastIndex = 0;
+      return matches;
+    }
+
+    function buildHighlight(text, matches) {
+      var html = "";
+      var pos = 0;
+      matches.forEach(function (match, index) {
+        var start = match.index;
+        var end = start + match[0].length;
+        if (start < pos) return;
+        html += escapeHtml(text.slice(pos, start));
+        var cls = index % 2 ? ' class="alt"' : "";
+        if (match[0] === "") {
+          html += '<mark class="zero" title="zero-length match">|</mark>';
+        } else {
+          html += "<mark" + cls + ">" + escapeHtml(match[0]) + "</mark>";
+        }
+        pos = end;
+      });
+      html += escapeHtml(text.slice(pos));
+      return html;
+    }
+
+    function renderMatches(matches, limitHit) {
+      matchesBody.innerHTML = "";
+      if (!matches.length) {
+        matchesEmpty.classList.remove("hidden");
+        matchesEmpty.textContent = "No matches.";
+        return;
+      }
+      matchesEmpty.classList.add("hidden");
+
+      matches.slice(0, MAX_LISTED).forEach(function (match, index) {
+        var tr = document.createElement("tr");
+
+        var numTd = document.createElement("td");
+        numTd.textContent = index + 1;
+        numTd.className = "hint";
+
+        var indexTd = document.createElement("td");
+        indexTd.textContent = match.index;
+        indexTd.className = "num";
+
+        var matchTd = document.createElement("td");
+        matchTd.className = "mono";
+        var text = match[0] === "" ? "(zero-length)" : match[0];
+        matchTd.textContent = text.length > 160 ? text.slice(0, 157) + "…" : text;
+
+        var groupsTd = document.createElement("td");
+        groupsTd.className = "mono";
+        var any = false;
+        for (var i = 1; i < match.length; i++) {
+          var line = document.createElement("span");
+          line.className = "group-line";
+          var label = document.createElement("span");
+          label.className = "group-name";
+          label.textContent = "$" + i + " ";
+          line.appendChild(label);
+          line.appendChild(document.createTextNode(match[i] === undefined ? "—" : match[i]));
+          groupsTd.appendChild(line);
+          any = true;
+        }
+        if (match.groups) {
+          Object.keys(match.groups).forEach(function (name) {
+            var line = document.createElement("span");
+            line.className = "group-line";
+            var label = document.createElement("span");
+            label.className = "group-name";
+            label.textContent = "<" + name + "> ";
+            line.appendChild(label);
+            line.appendChild(document.createTextNode(match.groups[name] === undefined ? "—" : match.groups[name]));
+            groupsTd.appendChild(line);
+            any = true;
+          });
+        }
+        if (!any) groupsTd.textContent = "—";
+
+        tr.appendChild(numTd);
+        tr.appendChild(indexTd);
+        tr.appendChild(matchTd);
+        tr.appendChild(groupsTd);
+        matchesBody.appendChild(tr);
+      });
+
+      if (limitHit) {
+        var tr = document.createElement("tr");
+        var td = document.createElement("td");
+        td.colSpan = 4;
+        td.className = "hint";
+        td.textContent = "Showing the first " + MAX_LISTED + " of " + (matches.length >= MAX_MATCHES ? MAX_MATCHES + "+" : matches.length) + " matches.";
+        tr.appendChild(td);
+        matchesBody.appendChild(tr);
+      }
+    }
+
+    function clearOutputs() {
+      highlight.textContent = "";
+      matchesBody.innerHTML = "";
+      matchesEmpty.classList.remove("hidden");
+      matchesEmpty.textContent = "No matches yet.";
+      result.value = "";
+      statusBadge.className = "badge muted";
+      statusBadge.textContent = "waiting for input";
+      statusHint.textContent = "";
+    }
+
+    function update() {
+      errorEl.textContent = "";
+      var pattern = patternInput.value;
+      var text = testInput.value;
+      var flags = selectedFlags();
+
+      if (!pattern) {
+        clearOutputs();
+        highlight.textContent = text;
+        return;
+      }
+
+      var re;
+      try {
+        re = new RegExp(pattern, flags);
+      } catch (e) {
+        clearOutputs();
+        highlight.textContent = text;
+        statusBadge.className = "badge bad";
+        statusBadge.textContent = "invalid pattern";
+        statusHint.textContent = "";
+        errorEl.textContent = e && e.message ? e.message : String(e);
+        return;
+      }
+
+      var matches;
+      try {
+        matches = collectMatches(re, text);
+      } catch (e) {
+        clearOutputs();
+        statusBadge.className = "badge bad";
+        statusBadge.textContent = "matching failed";
+        errorEl.textContent = e && e.message ? e.message : String(e);
+        return;
+      }
+
+      highlight.innerHTML = buildHighlight(text, matches);
+
+      var matchedChars = matches.reduce(function (sum, match) { return sum + match[0].length; }, 0);
+      statusBadge.className = "badge " + (matches.length ? "ok" : "muted");
+      statusBadge.textContent = matches.length ? matches.length + (matches.length >= MAX_MATCHES ? "+" : "") + " match(es)" : "no matches";
+      statusHint.textContent = "/" + pattern + "/" + flags + (matches.length ? " · " + matchedChars + " matched chars" : "");
+
+      renderMatches(matches, matches.length > MAX_LISTED);
+
+      try {
+        re.lastIndex = 0;
+        result.value = text.replace(re, replacementInput.value);
+      } catch (e) {
+        result.value = "";
+        errorEl.textContent = e && e.message ? e.message : String(e);
+      }
+    }
+
+    function schedule() {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(update, 100);
+    }
+
+    document.getElementById("exampleBtn").addEventListener("click", function () {
+      patternInput.value = EXAMPLE_PATTERN;
+      testInput.value = EXAMPLE_TEXT;
+      replacementInput.value = "$2 ($1)";
+      document.getElementById("flagG").checked = true;
+      update();
+    });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      patternInput.value = "";
+      testInput.value = "";
+      replacementInput.value = "";
+      errorEl.textContent = "";
+      clearOutputs();
+      patternInput.focus();
+    });
+    document.getElementById("copyResultBtn").addEventListener("click", function () {
+      var btn = this;
+      copyText(result.value).then(function () {
+        btn.textContent = "Copied!";
+        setTimeout(function () { btn.textContent = "Copy replacement result"; }, 1200);
+      });
+    });
+
+    function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+      result.select();
+      document.execCommand("copy");
+      return Promise.resolve();
+    }
+
+    [patternInput, testInput, replacementInput].forEach(function (el) {
+      el.addEventListener("input", schedule);
+    });
+    document.querySelectorAll(".opts input").forEach(function (el) {
+      el.addEventListener("change", update);
+    });
+    document.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        update();
+      }
+    });
+
+    clearOutputs();
+  </script>
+</body>
+</html>

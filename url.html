@@ -1,0 +1,409 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>url &amp; query string inspector</title>
+  <meta name="description" content="Break a URL into its components, inspect and edit query parameters, and rebuild the URL. Runs locally.">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>url &amp; query string inspector</h1>
+    <p class="subtitle">Parse a URL, edit its query parameters and rebuild it. Nothing leaves your browser.</p>
+
+    <label for="input">URL or query string</label>
+    <input type="text" id="input" placeholder="https://example.com/search?q=hello&page=2" spellcheck="false" autocomplete="off">
+
+    <div class="row">
+      <button id="exampleBtn" type="button" class="secondary">Load example</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+      <span class="spacer"></span>
+      <button id="copyJsonBtn" type="button" class="secondary">Copy as JSON</button>
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="modeBadge" class="badge muted">waiting for input</span>
+      <span id="modeHint" class="hint"></span>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+
+    <section class="card" id="componentsCard">
+      <h2>Components</h2>
+      <table>
+        <tbody id="componentsBody"></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Query parameters <span class="hint" style="font-weight:400">(edit in place)</span></h2>
+      <table>
+        <thead><tr><th style="width:2rem">#</th><th>Name</th><th>Value</th><th style="width:3rem"></th></tr></thead>
+        <tbody id="paramsBody"></tbody>
+      </table>
+      <div class="hint" id="paramsEmpty">No query parameters. Add one below.</div>
+      <div class="row">
+        <button id="addParamBtn" type="button" class="secondary">Add parameter</button>
+        <button id="sortParamsBtn" type="button" class="secondary">Sort by name</button>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2 id="rebuiltTitle">Rebuilt URL</h2>
+      <textarea id="rebuilt" readonly spellcheck="false" style="min-height:4.5em"></textarea>
+      <div class="row">
+        <button id="copyRebuiltBtn" type="button" class="secondary">Copy rebuilt</button>
+        <span class="spacer"></span>
+        <span id="sizeHint" class="hint"></span>
+      </div>
+      <div class="hint" style="margin-top:0.75rem">Fully percent-decoded view</div>
+      <pre class="out" id="decodedOut" style="margin-top:0.35rem;max-height:10rem"></pre>
+    </section>
+  </main>
+
+  <script>
+    "use strict";
+    var input = document.getElementById("input");
+    var errorEl = document.getElementById("error");
+    var modeBadge = document.getElementById("modeBadge");
+    var modeHint = document.getElementById("modeHint");
+    var componentsCard = document.getElementById("componentsCard");
+    var componentsBody = document.getElementById("componentsBody");
+    var paramsBody = document.getElementById("paramsBody");
+    var paramsEmpty = document.getElementById("paramsEmpty");
+    var rebuilt = document.getElementById("rebuilt");
+    var rebuiltTitle = document.getElementById("rebuiltTitle");
+    var decodedOut = document.getElementById("decodedOut");
+    var sizeHint = document.getElementById("sizeHint");
+    var timer = null;
+    var state = null;
+
+    var EXAMPLE = "https://user:pw@example.com:8443/a/b?tag=one&tag=two&q=hello%20world#section";
+
+    function escapeHtml(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    function parseInput(raw) {
+      var s = raw.trim();
+      if (!s) return null;
+
+      var startsWithSlash = s.charAt(0) === "/";
+      var firstEq = s.indexOf("=");
+      var looksLikeQuery =
+        s.charAt(0) === "?" ||
+        (firstEq > 0 && !startsWithSlash && s.indexOf("/") === -1 && s.indexOf("://") === -1);
+
+      if (looksLikeQuery) {
+        var qs = s.charAt(0) === "?" ? s.slice(1) : s;
+        var paramsUrl = new URL("https://example.invalid/?" + qs);
+        return {
+          mode: "query",
+          raw: s,
+          params: Array.from(paramsUrl.searchParams.entries()),
+          href: null,
+          assumed: false
+        };
+      }
+
+      var hasScheme = /^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(s);
+      var assumed = false;
+      if (s.charAt(0) === "/") {
+        // A path-only value: resolve it against a placeholder host so components
+        // and query params still work, and say so in the UI.
+        var rel = new URL(s, "https://example.invalid");
+        return {
+          mode: "url",
+          raw: raw.trim(),
+          params: Array.from(rel.searchParams.entries()),
+          href: rel.href,
+          assumed: true,
+          relative: true
+        };
+      }
+      if (s.indexOf("//") === 0) {
+        s = "https:" + s;
+      } else if (!hasScheme) {
+        s = "https://" + s;
+        assumed = true;
+      }
+
+      var u;
+      try {
+        u = new URL(s);
+      } catch (e) {
+        throw new Error("Could not parse that as a URL. For a raw query string, start it with '?'.");
+      }
+      return {
+        mode: "url",
+        raw: raw.trim(),
+        params: Array.from(u.searchParams.entries()),
+        href: u.href,
+        assumed: assumed
+      };
+    }
+
+    function componentRows() {
+      var u = new URL(state.href);
+      var rows = [
+        ["Full URL", u.href],
+        ["Protocol", u.protocol],
+        ["Username", u.username],
+        ["Password", u.password],
+        ["Host", u.host],
+        ["Hostname", u.hostname],
+        ["Port", u.port],
+        ["Path", u.pathname],
+        ["Query", u.search],
+        ["Fragment", u.hash],
+        ["Origin", u.origin]
+      ];
+      return rows.filter(function (row) {
+        if (row[0] === "Username" || row[0] === "Password") return row[1] !== "";
+        return true;
+      });
+    }
+
+    function renderComponents() {
+      componentsBody.innerHTML = "";
+      componentRows().forEach(function (row) {
+        var tr = document.createElement("tr");
+        var th = document.createElement("td");
+        th.textContent = row[0];
+        th.style.whiteSpace = "nowrap";
+        th.style.color = "var(--muted)";
+        var td = document.createElement("td");
+        td.className = "mono";
+        td.textContent = row[1] === "" ? "—" : row[1];
+        tr.appendChild(th);
+        tr.appendChild(td);
+        componentsBody.appendChild(tr);
+      });
+    }
+
+    function renderParams() {
+      paramsBody.innerHTML = "";
+      if (!state || !state.params.length) {
+        paramsEmpty.classList.remove("hidden");
+        return;
+      }
+      paramsEmpty.classList.add("hidden");
+
+      state.params.forEach(function (pair, index) {
+        var tr = document.createElement("tr");
+
+        var numTd = document.createElement("td");
+        numTd.textContent = index + 1;
+        numTd.className = "hint";
+
+        var nameTd = document.createElement("td");
+        var nameInput = document.createElement("input");
+        nameInput.type = "text";
+        nameInput.value = pair[0];
+        nameInput.placeholder = "name";
+        nameInput.className = "param-name";
+        nameInput.setAttribute("aria-label", "Parameter " + (index + 1) + " name");
+        nameInput.addEventListener("input", function () { pair[0] = nameInput.value; rebuild(); });
+        nameTd.appendChild(nameInput);
+
+        var valueTd = document.createElement("td");
+        var valueInput = document.createElement("input");
+        valueInput.type = "text";
+        valueInput.value = pair[1];
+        valueInput.placeholder = "value";
+        valueInput.className = "param-value";
+        valueInput.setAttribute("aria-label", "Parameter " + (index + 1) + " value");
+        valueInput.addEventListener("input", function () { pair[1] = valueInput.value; rebuild(); });
+        valueTd.appendChild(valueInput);
+
+        var actionTd = document.createElement("td");
+        var removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "secondary tiny";
+        removeBtn.textContent = "×";
+        removeBtn.title = "Remove this parameter";
+        removeBtn.setAttribute("aria-label", "Remove parameter " + (index + 1));
+        removeBtn.addEventListener("click", function () {
+          state.params.splice(index, 1);
+          renderParams();
+          rebuild();
+        });
+        actionTd.appendChild(removeBtn);
+
+        tr.appendChild(numTd);
+        tr.appendChild(nameTd);
+        tr.appendChild(valueTd);
+        tr.appendChild(actionTd);
+        paramsBody.appendChild(tr);
+      });
+    }
+
+    function rebuiltQuery() {
+      if (!state) return "";
+      var params = new URLSearchParams();
+      state.params.forEach(function (pair) {
+        if (pair[0] !== "" || pair[1] !== "") params.append(pair[0], pair[1]);
+      });
+      return params.toString();
+    }
+
+    function rebuild() {
+      if (!state) {
+        rebuilt.value = "";
+        decodedOut.textContent = "";
+        sizeHint.textContent = "";
+        return;
+      }
+      var q = rebuiltQuery();
+      if (state.mode === "query") {
+        rebuilt.value = q ? "?" + q : "";
+      } else {
+        var u = new URL(state.href);
+        u.search = "";
+        if (q) u.search = q;
+        rebuilt.value = u.href;
+      }
+
+      var decodedSource = state.mode === "query" ? rebuilt.value : state.href;
+      try {
+        decodedOut.textContent = decodeURIComponent(decodedSource);
+      } catch (e) {
+        decodedOut.textContent = decodedSource;
+      }
+      var bytes = new TextEncoder().encode(rebuilt.value).length;
+      sizeHint.textContent = rebuilt.value.length + " chars · " + bytes + " bytes · " + state.params.length + " parameter(s)";
+    }
+
+    function render() {
+      if (!state) return;
+      if (state.mode === "query") {
+        componentsCard.classList.add("hidden");
+        modeBadge.className = "badge";
+        modeBadge.textContent = "query string";
+        modeHint.textContent = "No scheme found; parsed as application/x-www-form-urlencoded.";
+        rebuiltTitle.textContent = "Rebuilt query string";
+      } else {
+        componentsCard.classList.remove("hidden");
+        modeBadge.className = "badge";
+        modeBadge.textContent = "url";
+        modeHint.textContent = (state.relative
+          ? "No host given; resolved against https://example.invalid. "
+          : state.assumed ? "No scheme given; assumed https://. " : "") + "Normalized by the URL API.";
+        rebuiltTitle.textContent = "Rebuilt URL";
+        renderComponents();
+      }
+      renderParams();
+      rebuild();
+    }
+
+    function clearAll() {
+      state = null;
+      componentsBody.innerHTML = "";
+      paramsBody.innerHTML = "";
+      paramsEmpty.classList.remove("hidden");
+      rebuilt.value = "";
+      decodedOut.textContent = "";
+      sizeHint.textContent = "";
+      componentsCard.classList.add("hidden");
+      modeBadge.className = "badge muted";
+      modeBadge.textContent = "waiting for input";
+      modeHint.textContent = "";
+    }
+
+    function run() {
+      errorEl.textContent = "";
+      var text = input.value;
+      if (!text.trim()) {
+        clearAll();
+        return;
+      }
+      try {
+        state = parseInput(text);
+        render();
+      } catch (e) {
+        state = null;
+        clearAll();
+        errorEl.textContent = e && e.message ? e.message : String(e);
+        modeBadge.textContent = "cannot parse";
+        modeBadge.className = "badge bad";
+      }
+    }
+
+    function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+      rebuilt.select();
+      document.execCommand("copy");
+      return Promise.resolve();
+    }
+
+    document.getElementById("exampleBtn").addEventListener("click", function () {
+      input.value = EXAMPLE;
+      run();
+    });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      input.value = "";
+      errorEl.textContent = "";
+      clearAll();
+      input.focus();
+    });
+    document.getElementById("addParamBtn").addEventListener("click", function () {
+      if (!state) {
+        state = { mode: "query", raw: "", params: [], href: null, assumed: false };
+        render();
+      }
+      state.params.push(["", ""]);
+      renderParams();
+      var names = paramsBody.querySelectorAll(".param-name");
+      if (names.length) names[names.length - 1].focus();
+      rebuild();
+    });
+    document.getElementById("sortParamsBtn").addEventListener("click", function () {
+      if (!state) return;
+      state.params.sort(function (a, b) {
+        if (a[0] !== b[0]) return a[0].localeCompare(b[0]);
+        return a[1].localeCompare(b[1]);
+      });
+      renderParams();
+      rebuild();
+    });
+    document.getElementById("copyRebuiltBtn").addEventListener("click", function () {
+      var btn = this;
+      copyText(rebuilt.value).then(function () {
+        btn.textContent = "Copied!";
+        setTimeout(function () { btn.textContent = "Copy rebuilt"; }, 1200);
+      });
+    });
+    document.getElementById("copyJsonBtn").addEventListener("click", function () {
+      if (!state) return;
+      var btn = this;
+      var data = { mode: state.mode, input: state.raw, assumedScheme: state.assumed, params: state.params.map(function (p) { return { name: p[0], value: p[1] }; }), rebuilt: rebuilt.value };
+      if (state.mode === "url") {
+        var u = new URL(state.href);
+        data.components = {
+          protocol: u.protocol, username: u.username, password: u.password,
+          host: u.host, hostname: u.hostname, port: u.port,
+          pathname: u.pathname, search: u.search, hash: u.hash, origin: u.origin
+        };
+      }
+      copyText(JSON.stringify(data, null, 2)).then(function () {
+        btn.textContent = "Copied!";
+        setTimeout(function () { btn.textContent = "Copy as JSON"; }, 1200);
+      });
+    });
+
+    input.addEventListener("input", function () {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(run, 120);
+    });
+    document.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        run();
+      }
+    });
+
+    clearAll();
+  </script>
+</body>
+</html>

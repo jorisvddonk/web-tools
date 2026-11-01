@@ -1,0 +1,370 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>json formatter / validator</title>
+  <meta name="description" content="Format, minify, sort and validate JSON in your browser. Shows the exact line and column of syntax errors.">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>json formatter / validator</h1>
+    <p class="subtitle">Format, minify, sort keys and validate JSON. Nothing leaves your browser.</p>
+
+    <label for="input">Input <span class="hint">(paste, or drop a .json file)</span></label>
+    <textarea id="input" class="tall" placeholder='{"hello": "world", "numbers": [1, 2, 3]}' spellcheck="false"></textarea>
+
+    <div class="row">
+      <button id="formatBtn" type="button">Format</button>
+      <button id="minifyBtn" type="button">Minify</button>
+      <button id="swapBtn" type="button" class="secondary" title="Move the output back into the input">Swap</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+      <span class="spacer"></span>
+      <label class="hint" for="indentSel" style="margin:0;font-weight:400">Indent</label>
+      <select id="indentSel" aria-label="Indent width">
+        <option value="2" selected>2 spaces</option>
+        <option value="4">4 spaces</option>
+        <option value="tab">tab</option>
+      </select>
+    </div>
+    <div class="opts">
+      <label><input type="checkbox" id="liveChk" checked> Convert live</label>
+      <label><input type="checkbox" id="sortChk"> Sort keys alphabetically</label>
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="status" class="badge muted">waiting for input</span>
+      <span id="statusDetail" class="hint"></span>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+
+    <label for="output">Output</label>
+    <textarea id="output" readonly spellcheck="false"></textarea>
+    <div class="row">
+      <button id="copyBtn" type="button" class="secondary">Copy output</button>
+      <span class="spacer"></span>
+      <span class="stats" id="stats"></span>
+    </div>
+  </main>
+
+  <script>
+    "use strict";
+    var input = document.getElementById("input");
+    var output = document.getElementById("output");
+    var errorEl = document.getElementById("error");
+    var statsEl = document.getElementById("stats");
+    var statusEl = document.getElementById("status");
+    var statusDetailEl = document.getElementById("statusDetail");
+    var liveChk = document.getElementById("liveChk");
+    var sortChk = document.getElementById("sortChk");
+    var indentSel = document.getElementById("indentSel");
+    var timer = null;
+
+    function sortDeep(value) {
+      if (Array.isArray(value)) return value.map(sortDeep);
+      if (value && typeof value === "object") {
+        var out = Object.create(null);
+        Object.keys(value).sort().forEach(function (key) { out[key] = sortDeep(value[key]); });
+        return out;
+      }
+      return value;
+    }
+
+    function indentValue() {
+      if (indentSel.value === "tab") return "\t";
+      return Number(indentSel.value);
+    }
+
+    // JSON.stringify silently rounds integers beyond Number.MAX_SAFE_INTEGER, so find
+    // large integer literals by scanning the raw text (skipping string contents).
+    function findUnsafeInteger(text) {
+      var inString = false, escaped = false;
+      for (var i = 0; i < text.length; i++) {
+        var c = text[i];
+        if (inString) {
+          if (escaped) escaped = false;
+          else if (c === "\\") escaped = true;
+          else if (c === '"') inString = false;
+          continue;
+        }
+        if (c === '"') { inString = true; continue; }
+        if (c === "-" || (c >= "0" && c <= "9")) {
+          var start = i;
+          if (c === "-") i++;
+          while (i < text.length && /[0-9eE+.\-]/.test(text[i])) i++;
+          var token = text.slice(start, i);
+          if (/^-?\d+$/.test(token) && !Number.isSafeInteger(Number(token))) return token;
+          i--;
+        }
+      }
+      return null;
+    }
+
+    function errorPosition(text, message) {
+      var match = /position\s+(\d+)/i.exec(message);
+      if (!match) return null;
+      return positionFromIndex(text, Number(match[1]));
+    }
+
+    function positionFromIndex(text, index) {
+      var pos = Math.max(0, Math.min(index, text.length));
+      var before = text.slice(0, pos).split("\n");
+      return { line: before.length, column: before[before.length - 1].length + 1 };
+    }
+
+    // Recent V8 versions dropped the position from JSON.parse error messages. Walk the
+    // text with a tiny strict parser so we can still point at the offending token.
+    function locateJsonError(text) {
+      var i = 0, n = text.length;
+
+      function fail(message, pos) {
+        throw { jsonLocator: true, message: message, pos: pos === undefined ? i : pos };
+      }
+      function isDigit(c) { return c >= "0" && c <= "9"; }
+      function ws() { while (i < n && /[ \t\n\r]/.test(text[i])) i++; }
+
+      function parseString() {
+        i++;
+        while (i < n) {
+          var c = text[i];
+          if (c === '"') { i++; return; }
+          if (c === "\\") {
+            i++;
+            if (i >= n) fail("Unterminated escape sequence");
+            var e = text[i];
+            if ('"\\/bfnrt'.indexOf(e) !== -1) { i++; continue; }
+            if (e === "u") {
+              for (var k = 1; k <= 4; k++) {
+                if (!/[0-9a-fA-F]/.test(text[i + k] || "")) fail("Invalid unicode escape", i + k);
+              }
+              i += 5;
+              continue;
+            }
+            fail('Invalid escape character "' + e + '"');
+          }
+          if (c === "\n" || c === "\r") fail("Unescaped newline in string");
+          if (c.charCodeAt(0) < 0x20) fail("Control character in string");
+          i++;
+        }
+        fail("Unterminated string");
+      }
+
+      function parseNumber() {
+        if (text[i] === "-") i++;
+        if (text[i] === "0") i++;
+        else if (isDigit(text[i])) { while (i < n && isDigit(text[i])) i++; }
+        else fail("Invalid number");
+        if (text[i] === ".") {
+          i++;
+          if (!isDigit(text[i] || "")) fail("Invalid number");
+          while (i < n && isDigit(text[i])) i++;
+        }
+        if (text[i] === "e" || text[i] === "E") {
+          i++;
+          if (text[i] === "+" || text[i] === "-") i++;
+          if (!isDigit(text[i] || "")) fail("Invalid number");
+          while (i < n && isDigit(text[i])) i++;
+        }
+      }
+
+      function parseValue() {
+        ws();
+        if (i >= n) fail("Unexpected end of input");
+        var c = text[i];
+        if (c === "{") return parseObject();
+        if (c === "[") return parseArray();
+        if (c === '"') return parseString();
+        if (c === "-" || isDigit(c)) return parseNumber();
+        if (text.startsWith("true", i)) { i += 4; return; }
+        if (text.startsWith("false", i)) { i += 5; return; }
+        if (text.startsWith("null", i)) { i += 4; return; }
+        fail("Unexpected character " + JSON.stringify(c));
+      }
+
+      function parseObject() {
+        i++;
+        ws();
+        if (text[i] === "}") { i++; return; }
+        while (true) {
+          ws();
+          if (text[i] !== '"') fail("Expected a string key");
+          parseString();
+          ws();
+          if (text[i] !== ":") fail("Expected ':' after key");
+          i++;
+          parseValue();
+          ws();
+          if (text[i] === ",") { i++; continue; }
+          if (text[i] === "}") { i++; return; }
+          fail("Expected ',' or '}'");
+        }
+      }
+
+      function parseArray() {
+        i++;
+        ws();
+        if (text[i] === "]") { i++; return; }
+        while (true) {
+          parseValue();
+          ws();
+          if (text[i] === ",") { i++; continue; }
+          if (text[i] === "]") { i++; return; }
+          fail("Expected ',' or ']'");
+        }
+      }
+
+      parseValue();
+      ws();
+      if (i < n) fail("Unexpected trailing content");
+    }
+
+    function cleanMessage(message) {
+      return message
+        .replace(/\s*in JSON at position \d+.*$/i, "")
+        .replace(/\s*at position \d+.*$/i, "")
+        .replace(/^JSON\.parse:\s*/i, "");
+    }
+
+    function setStatus(kind, label, detail) {
+      statusEl.className = "badge " + kind;
+      statusEl.textContent = label;
+      statusDetailEl.textContent = detail || "";
+    }
+
+    function updateStats() {
+      var inBytes = new TextEncoder().encode(input.value).length;
+      var outBytes = new TextEncoder().encode(output.value).length;
+      statsEl.textContent =
+        "input: " + input.value.length + " chars / " + inBytes + " bytes" +
+        "  ·  output: " + output.value.length + " chars / " + outBytes + " bytes";
+    }
+
+    function clearOutput() {
+      output.value = "";
+      updateStats();
+    }
+
+    function transform(mode) {
+      errorEl.textContent = "";
+      var text = input.value;
+      if (!text.trim()) {
+        clearOutput();
+        setStatus("muted", "waiting for input", "");
+        return;
+      }
+
+      var value;
+      try {
+        value = JSON.parse(text);
+      } catch (e) {
+        var message = e && e.message ? e.message : String(e);
+        var message2 = cleanMessage(message);
+        var loc = null;
+        try {
+          locateJsonError(text);
+        } catch (located) {
+          if (located && located.jsonLocator) {
+            message2 = located.message;
+            loc = positionFromIndex(text, located.pos);
+          }
+        }
+        if (!loc) loc = errorPosition(text, message);
+        errorEl.textContent = message2 + (loc ? " (line " + loc.line + ", column " + loc.column + ")" : "");
+        setStatus("bad", "invalid JSON", "");
+        clearOutput();
+        return;
+      }
+
+      var unsafe = findUnsafeInteger(text);
+      try {
+        if (sortChk.checked) value = sortDeep(value);
+        var result = mode === "minify"
+          ? JSON.stringify(value)
+          : JSON.stringify(value, null, indentValue());
+        if (result === undefined) throw new Error("That value cannot be represented as JSON.");
+        output.value = result;
+      } catch (e) {
+        errorEl.textContent = e && e.message ? e.message : String(e);
+        setStatus("bad", "cannot format", "");
+        clearOutput();
+        return;
+      }
+
+      var topLevel = Array.isArray(value) ? value.length + " items" : typeof value === "object" && value !== null ? Object.keys(value).length + " keys" : typeof value;
+      setStatus("ok", "valid JSON", topLevel + (unsafe ? " · large integer rounds: " + unsafe : ""));
+      if (unsafe) {
+        setStatus("warn", "valid JSON, precision risk", "integer beyond 2^53: " + unsafe);
+      }
+      updateStats();
+    }
+
+    function schedule() {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(function () { transform("format"); }, 120);
+    }
+
+    document.getElementById("formatBtn").addEventListener("click", function () { transform("format"); });
+    document.getElementById("minifyBtn").addEventListener("click", function () { transform("minify"); });
+    document.getElementById("swapBtn").addEventListener("click", function () {
+      input.value = output.value;
+      output.value = "";
+      errorEl.textContent = "";
+      updateStats();
+      transform("format");
+      input.focus();
+    });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      input.value = "";
+      errorEl.textContent = "";
+      clearOutput();
+      setStatus("muted", "waiting for input", "");
+      input.focus();
+    });
+    document.getElementById("copyBtn").addEventListener("click", function () {
+      var btn = this;
+      copyText(output.value).then(function () {
+        btn.textContent = "Copied!";
+        setTimeout(function () { btn.textContent = "Copy output"; }, 1200);
+      });
+    });
+
+    function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+      output.select();
+      document.execCommand("copy");
+      output.setSelectionRange(0, 0);
+      return Promise.resolve();
+    }
+
+    input.addEventListener("input", function () {
+      if (liveChk.checked) schedule();
+      else updateStats();
+    });
+    indentSel.addEventListener("change", function () { transform("format"); });
+    sortChk.addEventListener("change", function () { transform("format"); });
+    document.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        transform("format");
+      }
+    });
+
+    function loadFile(file) {
+      if (!file) return;
+      file.text().then(function (text) {
+        input.value = text;
+        transform("format");
+      });
+    }
+    input.addEventListener("dragover", function (e) { e.preventDefault(); });
+    input.addEventListener("drop", function (e) {
+      e.preventDefault();
+      loadFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+    });
+
+    updateStats();
+  </script>
+</body>
+</html>

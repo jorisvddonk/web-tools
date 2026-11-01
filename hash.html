@@ -1,0 +1,297 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>hash calculator</title>
+  <meta name="description" content="Compute SHA-1, SHA-256, SHA-384 and SHA-512 hashes of text or files locally in your browser.">
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    #input.dragging { border-color: var(--accent); background: #faf8ff; }
+    .digest { word-break: break-all; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <main>
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>hash calculator</h1>
+    <p class="subtitle">SHA-1, SHA-256, SHA-384 and SHA-512 for text or files. Nothing is uploaded.</p>
+
+    <label for="input">Text</label>
+    <textarea id="input" class="tall" placeholder="Type or paste text to hash, or drop a file anywhere on this box…" spellcheck="false"></textarea>
+
+    <div class="row">
+      <button id="fileBtn" type="button" class="secondary">Choose file…</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+      <input type="file" id="fileInput" class="hidden">
+      <span class="spacer"></span>
+      <button id="copyAllBtn" type="button" class="secondary">Copy all</button>
+    </div>
+    <div class="hint" id="fileInfo" style="margin-top:0.5rem"></div>
+
+    <div class="opts">
+      <label><input type="checkbox" id="alg1" checked> SHA-1</label>
+      <label><input type="checkbox" id="alg256" checked> SHA-256</label>
+      <label><input type="checkbox" id="alg384" checked> SHA-384</label>
+      <label><input type="checkbox" id="alg512" checked> SHA-512</label>
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="statusBadge" class="badge muted">waiting for input</span>
+      <span id="statusHint" class="hint"></span>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+
+    <table style="margin-top:1rem">
+      <thead><tr><th style="width:7rem">Algorithm</th><th>Hex digest</th><th style="width:4.5rem"></th></tr></thead>
+      <tbody id="results"></tbody>
+    </table>
+    <div class="hint" id="emptyHint">Hashes will appear here.</div>
+
+    <footer>MD5 is not provided by the Web Crypto API, so it is not included. Hashing is done with <span class="mono">crypto.subtle.digest</span>.</footer>
+  </main>
+
+  <script>
+    "use strict";
+    var input = document.getElementById("input");
+    var fileInput = document.getElementById("fileInput");
+    var fileInfo = document.getElementById("fileInfo");
+    var resultsBody = document.getElementById("results");
+    var emptyHint = document.getElementById("emptyHint");
+    var statusBadge = document.getElementById("statusBadge");
+    var statusHint = document.getElementById("statusHint");
+    var errorEl = document.getElementById("error");
+    var timer = null;
+    var generation = 0;
+    var fileBytes = null;
+    var fileName = "";
+
+    var ALGORITHMS = [
+      ["alg1", "SHA-1", "SHA-1"],
+      ["alg256", "SHA-256", "SHA-256"],
+      ["alg384", "SHA-384", "SHA-384"],
+      ["alg512", "SHA-512", "SHA-512"]
+    ];
+
+    function selectedAlgorithms() {
+      return ALGORITHMS.filter(function (a) {
+        return document.getElementById(a[0]).checked;
+      }).map(function (a) {
+        return { label: a[1], name: a[2] };
+      });
+    }
+
+    function toHex(buffer) {
+      var bytes = new Uint8Array(buffer);
+      var hex = "";
+      for (var i = 0; i < bytes.length; i++) hex += bytes[i].toString(16).padStart(2, "0");
+      return hex;
+    }
+
+    function formatBytes(n) {
+      if (n < 1024) return n + " bytes";
+      if (n < 1024 * 1024) return (n / 1024).toFixed(1) + " KiB (" + n.toLocaleString() + " bytes)";
+      return (n / (1024 * 1024)).toFixed(2) + " MiB (" + n.toLocaleString() + " bytes)";
+    }
+
+    function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+      var area = document.createElement("textarea");
+      area.value = text;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+      return Promise.resolve();
+    }
+
+    function clearResults() {
+      resultsBody.innerHTML = "";
+      emptyHint.classList.remove("hidden");
+      statusBadge.className = "badge muted";
+      statusBadge.textContent = "waiting for input";
+      statusHint.textContent = "";
+    }
+
+    function updateFileInfo() {
+      if (fileBytes) {
+        fileInfo.textContent = "Hashing file: " + fileName + " · " + formatBytes(fileBytes.length) + " · ";
+        var clear = document.createElement("a");
+        clear.href = "#";
+        clear.textContent = "clear file";
+        clear.addEventListener("click", function (e) {
+          e.preventDefault();
+          clearFile();
+        });
+        fileInfo.appendChild(clear);
+      } else {
+        fileInfo.textContent = "";
+      }
+    }
+
+    function clearFile() {
+      fileBytes = null;
+      fileName = "";
+      fileInput.value = "";
+      updateFileInfo();
+      update();
+    }
+
+    async function update() {
+      var myGeneration = ++generation;
+      errorEl.textContent = "";
+
+      var data;
+      var kind;
+      if (fileBytes) {
+        data = fileBytes;
+        kind = "file";
+      } else {
+        if (!input.value) {
+          clearResults();
+          return;
+        }
+        data = new TextEncoder().encode(input.value);
+        kind = "text";
+      }
+
+      var algorithms = selectedAlgorithms();
+      if (!algorithms.length) {
+        clearResults();
+        statusBadge.className = "badge warn";
+        statusBadge.textContent = "no algorithm selected";
+        return;
+      }
+      if (!crypto.subtle || !crypto.subtle.digest) {
+        clearResults();
+        errorEl.textContent = "This browser does not expose crypto.subtle, which needs a secure context (https:// or localhost).";
+        return;
+      }
+
+      statusBadge.className = "badge";
+      statusBadge.textContent = "hashing…";
+      var start = performance.now();
+
+      try {
+        var digests = await Promise.all(algorithms.map(function (alg) {
+          return crypto.subtle.digest(alg.name, data);
+        }));
+        if (myGeneration !== generation) return;
+        var elapsed = performance.now() - start;
+
+        resultsBody.innerHTML = "";
+        digests.forEach(function (digest, index) {
+          var alg = algorithms[index];
+          var hex = toHex(digest);
+          var tr = document.createElement("tr");
+          var nameTd = document.createElement("td");
+          nameTd.textContent = alg.label;
+          nameTd.style.whiteSpace = "nowrap";
+          var hexTd = document.createElement("td");
+          hexTd.className = "mono digest";
+          hexTd.textContent = hex;
+          var actionTd = document.createElement("td");
+          var btn = document.createElement("button");
+          btn.type = "button";
+          btn.className = "secondary tiny";
+          btn.textContent = "Copy";
+          btn.addEventListener("click", function () {
+            copyText(hex).then(function () {
+              btn.textContent = "Copied!";
+              setTimeout(function () { btn.textContent = "Copy"; }, 1200);
+            });
+          });
+          actionTd.appendChild(btn);
+          tr.appendChild(nameTd);
+          tr.appendChild(hexTd);
+          tr.appendChild(actionTd);
+          resultsBody.appendChild(tr);
+        });
+
+        emptyHint.classList.add("hidden");
+        statusBadge.className = "badge ok";
+        statusBadge.textContent = kind === "file" ? "file hashed" : "text hashed";
+        statusHint.textContent = data.length.toLocaleString() + " bytes · " + elapsed.toFixed(1) + " ms";
+      } catch (e) {
+        if (myGeneration !== generation) return;
+        clearResults();
+        statusBadge.className = "badge bad";
+        statusBadge.textContent = "hashing failed";
+        errorEl.textContent = e && e.message ? e.message : String(e);
+      }
+    }
+
+    function schedule() {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(update, 150);
+    }
+
+    function loadFile(file) {
+      if (!file) return;
+      file.arrayBuffer().then(function (buffer) {
+        fileBytes = new Uint8Array(buffer);
+        fileName = file.name || "dropped file";
+        updateFileInfo();
+        update();
+      }).catch(function (e) {
+        errorEl.textContent = "Could not read that file: " + (e && e.message ? e.message : String(e));
+      });
+    }
+
+    document.getElementById("fileBtn").addEventListener("click", function () { fileInput.click(); });
+    fileInput.addEventListener("change", function () { loadFile(fileInput.files[0]); });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      input.value = "";
+      errorEl.textContent = "";
+      clearFile();
+      input.focus();
+    });
+    document.getElementById("copyAllBtn").addEventListener("click", function () {
+      var lines = [];
+      resultsBody.querySelectorAll("tr").forEach(function (tr) {
+        lines.push(tr.children[0].textContent + ": " + tr.children[1].textContent);
+      });
+      if (!lines.length) return;
+      var btn = this;
+      copyText(lines.join("\n")).then(function () {
+        btn.textContent = "Copied!";
+        setTimeout(function () { btn.textContent = "Copy all"; }, 1200);
+      });
+    });
+
+    ALGORITHMS.forEach(function (alg) {
+      document.getElementById(alg[0]).addEventListener("change", update);
+    });
+    input.addEventListener("input", function () {
+      if (fileBytes) {
+        fileBytes = null;
+        fileName = "";
+        fileInput.value = "";
+        updateFileInfo();
+      }
+      schedule();
+    });
+
+    var dropZone = input;
+    ["dragover", "dragenter"].forEach(function (type) {
+      dropZone.addEventListener(type, function (e) {
+        e.preventDefault();
+        dropZone.classList.add("dragging");
+      });
+    });
+    ["dragleave", "dragend"].forEach(function (type) {
+      dropZone.addEventListener(type, function () { dropZone.classList.remove("dragging"); });
+    });
+    dropZone.addEventListener("drop", function (e) {
+      e.preventDefault();
+      dropZone.classList.remove("dragging");
+      loadFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+    });
+
+    updateFileInfo();
+    clearResults();
+  </script>
+</body>
+</html>

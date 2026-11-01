@@ -1,0 +1,324 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>unix timestamp converter</title>
+  <meta name="description" content="Convert between unix timestamps (seconds, milliseconds, microseconds, nanoseconds) and human-readable dates. Runs locally.">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>unix timestamp converter</h1>
+    <p class="subtitle">Epoch &harr; human dates, with auto-detected units. Dates without an offset are parsed in local time.</p>
+
+    <div class="card" style="margin-top:0">
+      <div class="hint" style="margin-bottom:0.35rem">Right now</div>
+      <div class="mono" id="nowLine" style="font-size:0.95rem">…</div>
+    </div>
+
+    <label for="input">Timestamp, date or "now"</label>
+    <input type="text" id="input" placeholder="1700000000, 1700000000000, 2023-11-14T22:13:20Z, now" spellcheck="false" autocomplete="off">
+
+    <div class="row">
+      <button id="nowBtn" type="button">Use now</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+      <span class="spacer"></span>
+      <label class="hint" for="unitSel" style="margin:0;font-weight:400">Input unit</label>
+      <select id="unitSel" aria-label="Input unit">
+        <option value="auto" selected>auto-detect</option>
+        <option value="s">seconds</option>
+        <option value="ms">milliseconds</option>
+        <option value="us">microseconds</option>
+        <option value="ns">nanoseconds</option>
+        <option value="date">date string</option>
+      </select>
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="detectedBadge" class="badge muted">waiting for input</span>
+      <span id="detectedHint" class="hint"></span>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+
+    <table style="margin-top:1rem">
+      <thead><tr><th style="width:11rem">Format</th><th>Value</th><th style="width:4.5rem"></th></tr></thead>
+      <tbody id="results"></tbody>
+    </table>
+    <div class="hint" id="precisionHint"></div>
+  </main>
+
+  <script>
+    "use strict";
+    var input = document.getElementById("input");
+    var unitSel = document.getElementById("unitSel");
+    var resultsBody = document.getElementById("results");
+    var errorEl = document.getElementById("error");
+    var nowLine = document.getElementById("nowLine");
+    var detectedBadge = document.getElementById("detectedBadge");
+    var detectedHint = document.getElementById("detectedHint");
+    var precisionHint = document.getElementById("precisionHint");
+    var timer = null;
+
+    var rtf = null;
+    try { rtf = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }); } catch (e) { /* ignore */ }
+
+    var ROWS = [
+      ["Unix (seconds)", "seconds"],
+      ["Unix (milliseconds)", "millis"],
+      ["Unix (microseconds)", "micros"],
+      ["Unix (nanoseconds)", "nanos"],
+      ["ISO 8601 (UTC)", "iso"],
+      ["ISO 8601 (local)", "localIso"],
+      ["RFC 1123 / GMT", "rfc"],
+      ["Relative", "relative"],
+      ["Human (local)", "human"],
+      ["Day / week", "week"],
+      ["Time zone", "zone"]
+    ];
+
+    function pad(n, width) {
+      var s = String(Math.abs(n));
+      while (s.length < (width || 2)) s = "0" + s;
+      return (n < 0 ? "-" : "") + s;
+    }
+
+    function relative(ms) {
+      var diff = ms - Date.now();
+      var abs = Math.abs(diff);
+      var units = [
+        [31536000000, "year"], [2592000000, "month"], [604800000, "week"],
+        [86400000, "day"], [3600000, "hour"], [60000, "minute"], [1000, "second"]
+      ];
+      for (var i = 0; i < units.length; i++) {
+        if (abs >= units[i][0] || i === units.length - 1) {
+          var value = Math.round(diff / units[i][0]);
+          if (rtf) return rtf.format(value, units[i][1]);
+          return value + " " + units[i][1] + (Math.abs(value) === 1 ? "" : "s") + (diff < 0 ? " ago" : " from now");
+        }
+      }
+      return "now";
+    }
+
+    function trimNumber(n) {
+      if (!isFinite(n)) return "invalid";
+      var s = n.toFixed(3);
+      s = s.replace(/\.?0+$/, "");
+      return s === "-0" ? "0" : s;
+    }
+
+    function localIso(d) {
+      var offset = -d.getTimezoneOffset();
+      var sign = offset >= 0 ? "+" : "-";
+      var oh = Math.floor(Math.abs(offset) / 60);
+      var om = Math.abs(offset) % 60;
+      return d.getFullYear() + "-" + pad(d.getMonth() + 1) + "-" + pad(d.getDate()) +
+        "T" + pad(d.getHours()) + ":" + pad(d.getMinutes()) + ":" + pad(d.getSeconds()) +
+        "." + pad(d.getMilliseconds(), 3) + sign + pad(oh) + ":" + pad(om);
+    }
+
+    function isoWeek(d) {
+      var t = new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()));
+      var day = t.getUTCDay() || 7;
+      t.setUTCDate(t.getUTCDate() + 4 - day);
+      var yearStart = new Date(Date.UTC(t.getUTCFullYear(), 0, 1));
+      return {
+        year: t.getUTCFullYear(),
+        week: Math.ceil(((t - yearStart) / 86400000 + 1) / 7)
+      };
+    }
+
+    function dayOfYear(d) {
+      var start = new Date(d.getFullYear(), 0, 1);
+      var startUtc = Date.UTC(start.getFullYear(), start.getMonth(), start.getDate());
+      var nowUtc = Date.UTC(d.getFullYear(), d.getMonth(), d.getDate());
+      return Math.round((nowUtc - startUtc) / 86400000) + 1;
+    }
+
+    function detectUnit(text) {
+      var n = Math.abs(Number(text));
+      if (n < 1e11) return "s";
+      if (n < 1e14) return "ms";
+      if (n < 1e17) return "us";
+      return "ns";
+    }
+
+    function parseInput(text, unit) {
+      var s = text.trim().replace(/^@/, "");
+      if (!s) return null;
+      if (/^now$/i.test(s)) return { ms: Date.now(), unit: "now", label: "now", auto: false };
+
+      if (unit === "date") {
+        var parsed = Date.parse(s);
+        if (isNaN(parsed)) throw new Error("That date could not be parsed. Try an ISO 8601 value like 2026-11-02T10:30:00Z.");
+        return { ms: parsed, unit: "date", label: "date string", auto: false };
+      }
+
+      if (/^[+-]?\d+(\.\d+)?$/.test(s)) {
+        var n = Number(s);
+        var chosen = unit === "auto" ? detectUnit(s) : unit;
+        var ms;
+        if (chosen === "s") ms = n * 1000;
+        else if (chosen === "ms") ms = n;
+        else if (chosen === "us") ms = n / 1000;
+        else ms = n / 1000000;
+        return { ms: ms, unit: chosen, label: { s: "seconds", ms: "milliseconds", us: "microseconds", ns: "nanoseconds" }[chosen], auto: unit === "auto" };
+      }
+
+      var byDate = Date.parse(s);
+      if (isNaN(byDate)) {
+        throw new Error("Not a number or a recognizable date. Try 1700000000, 1700000000000, or 2023-11-14T22:13:20Z.");
+      }
+      return { ms: byDate, unit: "date", label: "date string", auto: unit === "auto" };
+    }
+
+    function buildRow(label, value) {
+      var tr = document.createElement("tr");
+      var th = document.createElement("td");
+      th.textContent = label;
+      th.style.whiteSpace = "nowrap";
+      var td = document.createElement("td");
+      td.className = "mono";
+      td.textContent = value;
+      var actions = document.createElement("td");
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary tiny";
+      btn.textContent = "Copy";
+      btn.addEventListener("click", function () {
+        copyText(value).then(function () {
+          btn.textContent = "Copied!";
+          setTimeout(function () { btn.textContent = "Copy"; }, 1200);
+        });
+      });
+      actions.appendChild(btn);
+      tr.appendChild(th);
+      tr.appendChild(td);
+      tr.appendChild(actions);
+      return tr;
+    }
+
+    function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+      var area = document.createElement("textarea");
+      area.value = text;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+      return Promise.resolve();
+    }
+
+    function setEmpty() {
+      resultsBody.innerHTML = "";
+      detectedBadge.className = "badge muted";
+      detectedBadge.textContent = "waiting for input";
+      detectedHint.textContent = "";
+      precisionHint.textContent = "";
+    }
+
+    function fail(message) {
+      errorEl.textContent = message;
+      setEmpty();
+      detectedBadge.textContent = "cannot parse";
+      detectedBadge.className = "badge bad";
+    }
+
+    function convert() {
+      errorEl.textContent = "";
+      var text = input.value;
+      if (!text.trim()) {
+        setEmpty();
+        return;
+      }
+
+      var parsed;
+      try {
+        parsed = parseInput(text, unitSel.value);
+      } catch (e) {
+        fail(e.message);
+        return;
+      }
+      if (!parsed) {
+        setEmpty();
+        return;
+      }
+
+      var d = new Date(parsed.ms);
+      if (!isFinite(d.getTime())) {
+        fail("That timestamp is outside the range JavaScript dates can represent (roughly ±8.64e15 ms).");
+        return;
+      }
+
+      detectedBadge.className = "badge";
+      detectedBadge.textContent = parsed.label;
+      detectedHint.textContent = parsed.unit === "now"
+        ? "using the current time"
+        : parsed.auto
+          ? "auto-detected as " + parsed.label
+          : "interpreted as " + parsed.label;
+
+      var ms = parsed.ms;
+      var week = isoWeek(d);
+      var values = {
+        seconds: trimNumber(ms / 1000),
+        millis: trimNumber(ms),
+        micros: trimNumber(ms * 1000),
+        nanos: trimNumber(ms * 1000000),
+        iso: d.toISOString(),
+        localIso: localIso(d),
+        rfc: d.toUTCString(),
+        relative: relative(ms),
+        human: d.toLocaleString(undefined, { dateStyle: "full", timeStyle: "long" }),
+        week: "day " + dayOfYear(d) + " · ISO week " + week.week + " of " + week.year,
+        zone: (Intl.DateTimeFormat().resolvedOptions().timeZone || "local") + " (UTC" + (d.getTimezoneOffset() <= 0 ? "+" : "-") + pad(Math.floor(Math.abs(d.getTimezoneOffset()) / 60)) + ":" + pad(Math.abs(d.getTimezoneOffset()) % 60) + ")"
+      };
+
+      resultsBody.innerHTML = "";
+      ROWS.forEach(function (row) {
+        resultsBody.appendChild(buildRow(row[0], values[row[1]]));
+      });
+
+      precisionHint.textContent = Math.abs(ms * 1000000) > Number.MAX_SAFE_INTEGER
+        ? "Nanosecond output is approximate: JavaScript numbers lose precision above 2^53."
+        : "";
+    }
+
+    function updateNow() {
+      var d = new Date();
+      nowLine.textContent = Math.floor(d.getTime() / 1000) + " s  ·  " + d.getTime() + " ms  ·  " + d.toISOString();
+    }
+
+    document.getElementById("nowBtn").addEventListener("click", function () {
+      input.value = String(Math.floor(Date.now() / 1000));
+      unitSel.value = "auto";
+      convert();
+      input.focus();
+    });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      input.value = "";
+      errorEl.textContent = "";
+      setEmpty();
+      input.focus();
+    });
+    input.addEventListener("input", function () {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(convert, 120);
+    });
+    unitSel.addEventListener("change", convert);
+    document.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        convert();
+      }
+    });
+
+    updateNow();
+    setInterval(updateNow, 1000);
+    setEmpty();
+  </script>
+</body>
+</html>

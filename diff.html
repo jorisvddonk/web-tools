@@ -1,0 +1,445 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>text diff</title>
+  <meta name="description" content="Compare two blocks of text side by side or unified, with a copyable patch. Runs entirely in your browser.">
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .diff-wrap { overflow: auto; max-height: 36rem; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+    .diff-table { border-collapse: collapse; width: 100%; }
+    .diff-table th { position: sticky; top: 0; background: #fbfaf8; z-index: 1; border-bottom: 1px solid var(--border); padding: 0.4rem 0.6rem; }
+    .diff-table td { padding: 0 0.5rem; border: none; font-family: var(--mono); font-size: 0.82rem; line-height: 1.55; white-space: pre-wrap; overflow-wrap: anywhere; vertical-align: top; }
+    .diff-table td.num { color: var(--muted); text-align: right; width: 3.2rem; min-width: 3.2rem; user-select: none; font-variant-numeric: tabular-nums; }
+    .diff-table td.sign { width: 1rem; min-width: 1rem; user-select: none; font-weight: 600; }
+    .diff-table tr.del { background: #ffebe9; }
+    .diff-table tr.ins { background: #e6ffec; }
+    .diff-table tr.del td.sign { color: var(--danger); }
+    .diff-table tr.ins td.sign { color: var(--ok); }
+    .diff-table tr.side-del td.old, .diff-table tr.side-del td.old-num { background: #ffebe9; }
+    .diff-table tr.side-ins td.new, .diff-table tr.side-ins td.new-num { background: #e6ffec; }
+    .diff-table tr.side-pair td.old, .diff-table tr.side-pair td.old-num { background: #ffebe9; }
+    .diff-table tr.side-pair td.new, .diff-table tr.side-pair td.new-num { background: #e6ffec; }
+    .diff-table td.empty { background: #f6f5f2; }
+    .diff-table tr.side-del td.new, .diff-table tr.side-del td.new-num,
+    .diff-table tr.side-ins td.old, .diff-table tr.side-ins td.old-num { background: #f6f5f2; }
+    .diff-table td.code { width: 50%; }
+    .view-switch { display: inline-flex; gap: 0.25rem; }
+    .view-switch button.active { background: #eee9ff; border-color: var(--accent); color: #5b34d6; }
+    textarea.drop-hover { border-color: var(--accent); background: #faf8ff; }
+  </style>
+</head>
+<body>
+  <main class="wide">
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>text diff</h1>
+    <p class="subtitle">Compare two blocks of text, side by side or unified. Everything stays in your browser.</p>
+
+    <div class="grid" style="margin-top:0">
+      <div>
+        <label for="left">Original <span class="hint">(drop a text file)</span></label>
+        <textarea id="left" class="tall" placeholder="Paste the original text here…" spellcheck="false"></textarea>
+      </div>
+      <div>
+        <label for="right">Changed <span class="hint">(drop a text file)</span></label>
+        <textarea id="right" class="tall" placeholder="Paste the changed text here…" spellcheck="false"></textarea>
+      </div>
+    </div>
+
+    <div class="row">
+      <button id="compareBtn" type="button">Compare</button>
+      <button id="swapBtn" type="button" class="secondary">Swap sides</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+      <span class="spacer"></span>
+      <div class="view-switch" role="group" aria-label="Diff view">
+        <button type="button" class="secondary active" data-view="side">Side by side</button>
+        <button type="button" class="secondary" data-view="unified">Unified</button>
+        <button type="button" class="secondary" data-view="patch">Patch</button>
+      </div>
+    </div>
+    <div class="opts">
+      <label><input type="checkbox" id="liveChk" checked> Compare live</label>
+      <label><input type="checkbox" id="wsChk"> Ignore whitespace</label>
+      <label><input type="checkbox" id="caseChk"> Ignore case</label>
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="statusBadge" class="badge muted">waiting for input</span>
+      <span id="statusHint" class="hint"></span>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+
+    <div class="row">
+      <span class="stats" id="stats"></span>
+      <span class="spacer"></span>
+      <button id="copyPatchBtn" type="button" class="secondary">Copy patch</button>
+    </div>
+
+    <div class="diff-wrap" id="diffWrap" style="margin-top:0.5rem">
+      <table class="diff-table" id="diffTable"></table>
+      <pre class="out hidden" id="patchOut" style="margin:0;border:none;max-height:none"></pre>
+    </div>
+    <div class="hint hidden" id="truncNote"></div>
+  </main>
+
+  <script>
+    "use strict";
+    var left = document.getElementById("left");
+    var right = document.getElementById("right");
+    var diffTable = document.getElementById("diffTable");
+    var patchOut = document.getElementById("patchOut");
+    var truncNote = document.getElementById("truncNote");
+    var statusBadge = document.getElementById("statusBadge");
+    var statusHint = document.getElementById("statusHint");
+    var errorEl = document.getElementById("error");
+    var statsEl = document.getElementById("stats");
+    var liveChk = document.getElementById("liveChk");
+    var wsChk = document.getElementById("wsChk");
+    var caseChk = document.getElementById("caseChk");
+    var timer = null;
+    var view = "side";
+    var lastPatch = "";
+
+    var MAX_RENDER_ROWS = 12000;
+
+    function escapeHtml(s) {
+      return String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    }
+
+    function normalizeAll(text) {
+      return text.replace(/\r\n?/g, "\n");
+    }
+
+    function lineKey(line) {
+      var key = line;
+      if (wsChk.checked) key = key.replace(/\s+/g, " ").trim();
+      if (caseChk.checked) key = key.toLowerCase();
+      return key;
+    }
+
+    function myers(a, b) {
+      var n = a.length, m = b.length, max = n + m;
+      var v = new Map();
+      v.set(1, 0);
+      var trace = [];
+
+      for (var d = 0; d <= max; d++) {
+        // Bail out before memory use gets silly on very large rewrites.
+        if (trace.length > 1200) throw new Error("DIFF_TOO_LARGE");
+        trace.push(new Map(v));
+        for (var k = -d; k <= d; k += 2) {
+          var x;
+          var km = v.get(k - 1);
+          var kp = v.get(k + 1);
+          if (k === -d || (k !== d && (km === undefined ? -Infinity : km) < (kp === undefined ? -Infinity : kp))) {
+            x = kp === undefined ? 0 : kp;
+          } else {
+            x = (km === undefined ? 0 : km) + 1;
+          }
+          var y = x - k;
+          while (x < n && y < m && a[x].key === b[y].key) { x++; y++; }
+          v.set(k, x);
+          if (x >= n && y >= m) return backtrack(trace, a, b, d);
+        }
+      }
+      throw new Error("DIFF_FAILED");
+    }
+
+    function backtrack(trace, a, b, distance) {
+      var x = a.length, y = b.length;
+      var ops = [];
+      for (var d = distance; d > 0; d--) {
+        var v = trace[d];
+        var k = x - y;
+        var km = v.get(k - 1);
+        var kp = v.get(k + 1);
+        var prevK;
+        if (k === -d || (k !== d && (km === undefined ? -Infinity : km) < (kp === undefined ? -Infinity : kp))) {
+          prevK = k + 1;
+        } else {
+          prevK = k - 1;
+        }
+        var prevX = v.get(prevK) || 0;
+        var prevY = prevX - prevK;
+        while (x > prevX && y > prevY) {
+          ops.push({ type: "eq", text: a[x - 1].text });
+          x--; y--;
+        }
+        if (x === prevX) {
+          if (y > 0) { ops.push({ type: "ins", text: b[y - 1].text }); y--; }
+        } else {
+          ops.push({ type: "del", text: a[x - 1].text }); x--;
+        }
+      }
+      while (x > 0 && y > 0 && a[x - 1].key === b[y - 1].key) {
+        ops.push({ type: "eq", text: a[x - 1].text });
+        x--; y--;
+      }
+      while (x > 0) { ops.push({ type: "del", text: a[x - 1].text }); x--; }
+      while (y > 0) { ops.push({ type: "ins", text: b[y - 1].text }); y--; }
+      ops.reverse();
+      return ops;
+    }
+
+    function computeOps(aLines, bLines) {
+      var a = aLines.map(function (line) { return { text: line, key: lineKey(line) }; });
+      var b = bLines.map(function (line) { return { text: line, key: lineKey(line) }; });
+
+      var start = 0;
+      while (start < a.length && start < b.length && a[start].key === b[start].key) start++;
+      var endA = a.length, endB = b.length;
+      while (endA > start && endB > start && a[endA - 1].key === b[endB - 1].key) { endA--; endB--; }
+
+      var midA = a.slice(start, endA);
+      var midB = b.slice(start, endB);
+      var tooLarge = false;
+      var midOps;
+      try {
+        midOps = myers(midA, midB);
+      } catch (e) {
+        tooLarge = true;
+        midOps = [];
+        midA.forEach(function (line) { midOps.push({ type: "del", text: line.text }); });
+        midB.forEach(function (line) { midOps.push({ type: "ins", text: line.text }); });
+      }
+
+      var ops = [];
+      for (var i = 0; i < start; i++) ops.push({ type: "eq", text: a[i].text });
+      midOps.forEach(function (op) { ops.push(op); });
+      for (var j = 0; j < a.length - endA; j++) ops.push({ type: "eq", text: a[endA + j].text });
+
+      return { ops: ops, tooLarge: tooLarge };
+    }
+
+    function numberOps(ops) {
+      var oldNo = 1, newNo = 1;
+      return ops.map(function (op) {
+        var row = { type: op.type, text: op.text, oldBefore: oldNo, newBefore: newNo, old: null, new: null };
+        if (op.type === "eq") { row.old = oldNo++; row.new = newNo++; }
+        else if (op.type === "del") { row.old = oldNo++; }
+        else { row.new = newNo++; }
+        return row;
+      });
+    }
+
+    function renderSide(rows) {
+      var html = '<thead><tr><th colspan="2" style="text-align:right">Original</th><th colspan="2">Changed</th></tr></thead><tbody>';
+      var i = 0;
+      var rendered = 0;
+      while (i < rows.length && rendered < MAX_RENDER_ROWS) {
+        if (rows[i].type === "eq") {
+          html += '<tr><td class="num">' + rows[i].old + '</td><td class="code">' + escapeHtml(rows[i].text) +
+            '</td><td class="num">' + rows[i].new + '</td><td class="code">' + escapeHtml(rows[i].text) + "</td></tr>";
+          i++;
+          rendered++;
+          continue;
+        }
+        var dels = [], inss = [];
+        while (i < rows.length && rows[i].type !== "eq") {
+          if (rows[i].type === "del") dels.push(rows[i]);
+          else inss.push(rows[i]);
+          i++;
+        }
+        var count = Math.max(dels.length, inss.length);
+        for (var j = 0; j < count && rendered < MAX_RENDER_ROWS; j++) {
+          var del = dels[j] || null;
+          var ins = inss[j] || null;
+          var rowClass = del && ins ? "side-pair" : del ? "side-del" : "side-ins";
+          html += '<tr class="' + rowClass + '">' +
+            '<td class="num old-num">' + (del ? del.old : "") + '</td>' +
+            '<td class="code old' + (del ? "" : " empty") + '">' + (del ? escapeHtml(del.text) : "") + "</td>" +
+            '<td class="num new-num">' + (ins ? ins.new : "") + '</td>' +
+            '<td class="code new' + (ins ? "" : " empty") + '">' + (ins ? escapeHtml(ins.text) : "") + "</td>" +
+            "</tr>";
+          rendered++;
+        }
+      }
+      html += "</tbody>";
+      return { html: html, truncated: rendered >= MAX_RENDER_ROWS };
+    }
+
+    function renderUnified(rows) {
+      var html = '<thead><tr><th>Old</th><th>New</th><th></th><th>Line</th></tr></thead><tbody>';
+      var rendered = 0;
+      for (var i = 0; i < rows.length && rendered < MAX_RENDER_ROWS; i++) {
+        var row = rows[i];
+        var sign = row.type === "eq" ? " " : row.type === "del" ? "-" : "+";
+        html += '<tr class="' + (row.type === "eq" ? "" : row.type) + '">' +
+          '<td class="num">' + (row.type === "ins" ? "" : row.old) + '</td>' +
+          '<td class="num">' + (row.type === "del" ? "" : row.new) + '</td>' +
+          '<td class="sign">' + sign + '</td>' +
+          '<td class="code">' + escapeHtml(row.text) + "</td></tr>";
+        rendered++;
+      }
+      html += "</tbody>";
+      return { html: html, truncated: rendered >= MAX_RENDER_ROWS };
+    }
+
+    function generatePatch(rows) {
+      var changes = [];
+      rows.forEach(function (row, index) { if (row.type !== "eq") changes.push(index); });
+      if (!changes.length) return "";
+
+      var context = 3;
+      var groups = [];
+      changes.forEach(function (index) {
+        var start = Math.max(0, index - context);
+        var end = Math.min(rows.length, index + context + 1);
+        var last = groups[groups.length - 1];
+        if (last && start <= last.end) last.end = Math.max(last.end, end);
+        else groups.push({ start: start, end: end });
+      });
+
+      var lines = ["--- a/original", "+++ b/changed"];
+      groups.forEach(function (group) {
+        var slice = rows.slice(group.start, group.end);
+        var oldStart = slice[0].oldBefore;
+        var newStart = slice[0].newBefore;
+        var oldCount = slice.filter(function (row) { return row.type !== "ins"; }).length;
+        var newCount = slice.filter(function (row) { return row.type !== "del"; }).length;
+        if (oldCount === 0) oldStart -= 1;
+        if (newCount === 0) newStart -= 1;
+        lines.push("@@ -" + oldStart + "," + oldCount + " +" + newStart + "," + newCount + " @@");
+        slice.forEach(function (row) {
+          var prefix = row.type === "eq" ? " " : row.type === "del" ? "-" : "+";
+          lines.push(prefix + row.text);
+        });
+      });
+      return lines.join("\n");
+    }
+
+    function render() {
+      errorEl.textContent = "";
+      var leftText = normalizeAll(left.value);
+      var rightText = normalizeAll(right.value);
+
+      if (!leftText && !rightText) {
+        diffTable.innerHTML = "";
+        diffTable.classList.remove("hidden");
+        patchOut.classList.add("hidden");
+        truncNote.classList.add("hidden");
+        lastPatch = "";
+        statusBadge.className = "badge muted";
+        statusBadge.textContent = "waiting for input";
+        statusHint.textContent = "";
+        statsEl.textContent = "";
+        return;
+      }
+
+      var aLines = leftText === "" ? [] : leftText.split("\n");
+      var bLines = rightText === "" ? [] : rightText.split("\n");
+      var result = computeOps(aLines, bLines);
+      var rows = numberOps(result.ops);
+      lastPatch = generatePatch(rows);
+
+      var additions = 0, deletions = 0, unchanged = 0;
+      rows.forEach(function (row) {
+        if (row.type === "ins") additions++;
+        else if (row.type === "del") deletions++;
+        else unchanged++;
+      });
+
+      var identical = additions === 0 && deletions === 0;
+      statusBadge.className = "badge " + (identical ? "ok" : "warn");
+      statusBadge.textContent = identical ? "identical" : (additions + deletions) + " changed line(s)";
+      statusHint.textContent = "original " + aLines.length + " lines · changed " + bLines.length + " lines" +
+        (result.tooLarge ? " · too large for a minimal diff, showing full replacement" : "");
+      statsEl.textContent = "+" + additions + " added · −" + deletions + " removed · " + unchanged + " unchanged";
+
+      if (view === "patch") {
+        diffTable.classList.add("hidden");
+        patchOut.classList.remove("hidden");
+        patchOut.textContent = lastPatch || "(no differences)";
+        truncNote.classList.add("hidden");
+        return;
+      }
+
+      diffTable.classList.remove("hidden");
+      patchOut.classList.add("hidden");
+      var rendered = view === "side" ? renderSide(rows) : renderUnified(rows);
+      diffTable.innerHTML = rendered.html;
+      truncNote.classList.toggle("hidden", !rendered.truncated);
+      truncNote.textContent = rendered.truncated
+        ? "Output truncated at " + MAX_RENDER_ROWS + " rows. Use Copy patch for the full diff."
+        : "";
+    }
+
+    function schedule() {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(render, 250);
+    }
+
+    function setView(next) {
+      view = next;
+      document.querySelectorAll(".view-switch button").forEach(function (btn) {
+        btn.classList.toggle("active", btn.dataset.view === view);
+      });
+      render();
+    }
+
+    document.querySelectorAll(".view-switch button").forEach(function (btn) {
+      btn.addEventListener("click", function () { setView(btn.dataset.view); });
+    });
+    document.getElementById("compareBtn").addEventListener("click", render);
+    document.getElementById("swapBtn").addEventListener("click", function () {
+      var tmp = left.value;
+      left.value = right.value;
+      right.value = tmp;
+      render();
+    });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      left.value = "";
+      right.value = "";
+      render();
+      left.focus();
+    });
+    document.getElementById("copyPatchBtn").addEventListener("click", function () {
+      var btn = this;
+      var text = lastPatch || "(no differences)";
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text);
+      } else {
+        var area = document.createElement("textarea");
+        area.value = text;
+        document.body.appendChild(area);
+        area.select();
+        document.execCommand("copy");
+        area.remove();
+      }
+      btn.textContent = "Copied!";
+      setTimeout(function () { btn.textContent = "Copy patch"; }, 1200);
+    });
+
+    function wireDrop(el) {
+      el.addEventListener("dragover", function (e) { e.preventDefault(); el.classList.add("drop-hover"); });
+      el.addEventListener("dragleave", function () { el.classList.remove("drop-hover"); });
+      el.addEventListener("drop", function (e) {
+        e.preventDefault();
+        el.classList.remove("drop-hover");
+        var file = e.dataTransfer.files && e.dataTransfer.files[0];
+        if (!file) return;
+        file.text().then(function (text) {
+          el.value = normalizeAll(text);
+          render();
+        });
+      });
+    }
+    wireDrop(left);
+    wireDrop(right);
+
+    left.addEventListener("input", function () { if (liveChk.checked) schedule(); });
+    right.addEventListener("input", function () { if (liveChk.checked) schedule(); });
+    wsChk.addEventListener("change", render);
+    caseChk.addEventListener("change", render);
+    document.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        render();
+      }
+    });
+
+    render();
+  </script>
+</body>
+</html>
