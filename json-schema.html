@@ -1,0 +1,811 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>json schema tester</title>
+  <meta name="description" content="Validate JSON instances against JSON Schema draft-04, draft-06, draft-07, 2019-09 and 2020-12 in your browser.">
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .errors-wrap { overflow-x: auto; }
+    .errors-wrap td { vertical-align: top; }
+    .err-path { font-family: var(--mono); font-size: 0.8rem; word-break: break-all; min-width: 7rem; }
+    .err-keyword { font-family: var(--mono); font-size: 0.8rem; white-space: nowrap; }
+    .err-msg { font-size: 0.85rem; }
+    .err-schema { font-family: var(--mono); font-size: 0.78rem; word-break: break-all; color: var(--muted); }
+    .schema-mode .schema-col { display: none; }
+    @media (max-width: 760px) { .schema-col { display: none; } }
+    @media (max-width: 700px) {
+      .errors-wrap table,
+      .errors-wrap thead,
+      .errors-wrap tbody,
+      .errors-wrap tr,
+      .errors-wrap td { display: block; width: 100%; }
+      .errors-wrap thead { display: none; }
+      .errors-wrap tbody tr { border-bottom: 1px solid var(--border); padding: 0.5rem 0; }
+      .errors-wrap tbody tr:last-child { border-bottom: none; }
+      .errors-wrap td { border: none; padding: 0.1rem 0.5rem; }
+      .errors-wrap td::before {
+        display: inline-block;
+        min-width: 4.5rem;
+        color: var(--muted);
+        font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+        font-size: 0.72rem;
+        text-transform: uppercase;
+        letter-spacing: 0.04em;
+      }
+      .errors-wrap td.err-path::before { content: "Path"; }
+      .errors-wrap td.err-keyword::before { content: "Keyword"; }
+      .errors-wrap td.err-msg::before { content: "Message"; }
+      .errors-wrap td.err-schema::before { content: "Schema"; }
+    }
+    #schema, #instance { min-height: 18em; }
+  </style>
+</head>
+<body>
+  <main class="wide">
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>json schema tester</h1>
+    <p class="subtitle">Validate a JSON instance against draft-04, draft-06, draft-07, 2019-09 or 2020-12. Schemas and data stay in your browser.</p>
+
+    <div class="row" style="margin-top:0">
+      <label for="versionSel" style="margin:0">Draft</label>
+      <select id="versionSel" aria-label="JSON Schema draft">
+        <option value="auto" selected>auto-detect from $schema</option>
+        <option value="draft4">draft-04</option>
+        <option value="draft6">draft-06</option>
+        <option value="draft7">draft-07</option>
+        <option value="2019-09">2019-09</option>
+        <option value="2020-12">2020-12</option>
+      </select>
+    </div>
+
+    <div class="grid" style="margin-top:0.75rem">
+      <div>
+        <label for="schema">Schema</label>
+        <textarea id="schema" placeholder='{"type": "object", "required": ["name"]}' spellcheck="false"></textarea>
+      </div>
+      <div>
+        <label for="instance">Instance</label>
+        <textarea id="instance" placeholder='{"name": "Ada"}' spellcheck="false"></textarea>
+      </div>
+    </div>
+
+    <div class="opts">
+      <label><input type="checkbox" id="liveChk" checked> Validate live</label>
+    </div>
+
+    <div class="row">
+      <button id="validateBtn" type="button">Validate</button>
+      <span class="spacer"></span>
+      <select id="exampleSel" aria-label="Example schema">
+        <option value="person">Person · draft-07</option>
+        <option value="product">Product · draft-04</option>
+        <option value="inventory">Inventory · draft-06</option>
+        <option value="config">Config · 2019-09</option>
+        <option value="order">Order · 2020-12</option>
+      </select>
+      <button id="loadValidBtn" type="button" class="secondary">Load valid</button>
+      <button id="loadInvalidBtn" type="button" class="secondary">Load invalid</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="statusBadge" class="badge muted">waiting for input</span>
+      <span id="draftHint" class="hint"></span>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+
+    <section class="card">
+      <div class="row" style="margin-top:0">
+        <h2 style="margin:0">Result</h2>
+        <span class="spacer"></span>
+        <button id="copyErrorsBtn" type="button" class="secondary tiny">Copy report</button>
+      </div>
+      <div class="hint" id="summary" style="margin-top:0.5rem" aria-live="polite">Paste a schema and an instance, or load an example.</div>
+
+      <div class="errors-wrap hidden" id="errorsWrap" style="margin-top:0.75rem">
+        <table>
+          <thead>
+            <tr>
+              <th id="pathHeader">Instance path</th>
+              <th>Keyword</th>
+              <th>Message</th>
+              <th class="schema-col">Schema path</th>
+            </tr>
+          </thead>
+          <tbody id="errorsBody"></tbody>
+        </table>
+      </div>
+      <div class="hint" id="noErrors" style="margin-top:0.75rem">Run a validation to see results.</div>
+
+      <details class="hidden" id="rawDetails" style="margin-top:0.75rem">
+        <summary class="hint" style="cursor:pointer">Error details (JSON)</summary>
+        <pre class="out" id="rawErrors" style="margin-top:0.5rem;max-height:16rem"></pre>
+      </details>
+    </section>
+
+    <footer>
+      Validation by Ajv for draft-06/07/2019-09/2020-12, and <span class="mono">@cfworker/json-schema</span> for draft-04.
+      Libraries load from a CDN on first use; schemas and instances never leave the browser. Remote <span class="mono">$ref</span>s are not fetched.
+      Format keywords are asserted.
+    </footer>
+  </main>
+
+  <script src="./json-locator.js"></script>
+  <script>
+    "use strict";
+    var schemaInput = document.getElementById("schema");
+    var instanceInput = document.getElementById("instance");
+    var versionSel = document.getElementById("versionSel");
+    var exampleSel = document.getElementById("exampleSel");
+    var liveChk = document.getElementById("liveChk");
+    var statusBadge = document.getElementById("statusBadge");
+    var draftHint = document.getElementById("draftHint");
+    var errorEl = document.getElementById("error");
+    var summaryEl = document.getElementById("summary");
+    var errorsWrap = document.getElementById("errorsWrap");
+    var errorsBody = document.getElementById("errorsBody");
+    var pathHeader = document.getElementById("pathHeader");
+    var noErrors = document.getElementById("noErrors");
+    var rawDetails = document.getElementById("rawDetails");
+    var rawErrors = document.getElementById("rawErrors");
+    var copyErrorsBtn = document.getElementById("copyErrorsBtn");
+    var timer = null;
+    var runSeq = 0;
+    var lastReport = null;
+
+    var DRAFT_LABELS = {
+      draft4: "draft-04",
+      draft6: "draft-06",
+      draft7: "draft-07",
+      "2019-09": "2019-09",
+      "2020-12": "2020-12"
+    };
+
+    var META_IDS = {
+      draft6: "http://json-schema.org/draft-06/schema#",
+      draft7: "http://json-schema.org/draft-07/schema#",
+      "2019-09": "https://json-schema.org/draft/2019-09/schema",
+      "2020-12": "https://json-schema.org/draft/2020-12/schema"
+    };
+
+    var AJV_BUNDLES = {
+      draft6: {
+        url: "https://cdn.jsdelivr.net/npm/ajv-dist@8.17.1/dist/ajv7.bundle.js",
+        globalName: "ajv7",
+        label: "Ajv 8"
+      },
+      draft7: {
+        url: "https://cdn.jsdelivr.net/npm/ajv-dist@8.17.1/dist/ajv7.bundle.js",
+        globalName: "ajv7",
+        label: "Ajv 8"
+      },
+      "2019-09": {
+        url: "https://cdn.jsdelivr.net/npm/ajv-dist@8.17.1/dist/ajv2019.bundle.js",
+        globalName: "ajv2019",
+        label: "Ajv 8"
+      },
+      "2020-12": {
+        url: "https://cdn.jsdelivr.net/npm/ajv-dist@8.17.1/dist/ajv2020.bundle.js",
+        globalName: "ajv2020",
+        label: "Ajv 8"
+      }
+    };
+
+    var EXAMPLES = {
+      person: {
+        schema: {
+          "$schema": "http://json-schema.org/draft-07/schema#",
+          title: "Person",
+          type: "object",
+          required: ["name", "email"],
+          properties: {
+            name: { type: "string", minLength: 2 },
+            email: { type: "string", format: "email" },
+            age: { type: "integer", minimum: 0 },
+            tags: { type: "array", items: { type: "string" }, uniqueItems: true }
+          },
+          additionalProperties: false
+        },
+        valid: { name: "Ada", email: "ada@example.com", age: 36, tags: ["math", "code"] },
+        invalid: { name: "A", email: "not-an-email", age: -1, tags: ["dup", "dup"], extra: true }
+      },
+      product: {
+        schema: {
+          "$schema": "http://json-schema.org/draft-04/schema#",
+          title: "Product",
+          type: "object",
+          required: ["sku", "price"],
+          properties: {
+            sku: { type: "string", pattern: "^[A-Z]{3}-[0-9]{4}$" },
+            price: { type: "number", minimum: 0, exclusiveMinimum: true },
+            tags: { type: "array", items: { type: "string" }, minItems: 1 }
+          },
+          additionalProperties: false
+        },
+        valid: { sku: "ABC-1234", price: 19.99, tags: ["new"] },
+        invalid: { sku: "abc-12", price: 0, tags: [] }
+      },
+      inventory: {
+        schema: {
+          "$schema": "http://json-schema.org/draft-06/schema#",
+          title: "Inventory",
+          type: "object",
+          required: ["region", "items"],
+          properties: {
+            region: { const: "eu-west-1" },
+            items: {
+              type: "array",
+              minItems: 1,
+              items: {
+                type: "object",
+                required: ["id", "qty"],
+                properties: {
+                  id: { type: "string", pattern: "^[a-z]+-[0-9]+$" },
+                  qty: { type: "integer", exclusiveMinimum: 0 },
+                  status: { enum: ["in-stock", "backorder"] }
+                }
+              }
+            }
+          }
+        },
+        valid: { region: "eu-west-1", items: [{ id: "item-1", qty: 3, status: "in-stock" }] },
+        invalid: { region: "us-east-1", items: [{ id: "ITEM", qty: 0, status: "lost" }] }
+      },
+      config: {
+        schema: {
+          "$schema": "https://json-schema.org/draft/2019-09/schema",
+          "$id": "https://example.com/config",
+          title: "Service config",
+          type: "object",
+          required: ["mode"],
+          properties: {
+            mode: { enum: ["development", "production"] },
+            tls: {
+              type: "object",
+              required: ["cert", "key"],
+              properties: { cert: { type: "string" }, key: { type: "string" } }
+            },
+            replicas: { type: "integer", minimum: 1, maximum: 10 }
+          },
+          if: { properties: { mode: { const: "production" } } },
+          then: { required: ["tls"] },
+          unevaluatedProperties: false
+        },
+        valid: { mode: "production", tls: { cert: "cert.pem", key: "key.pem" }, replicas: 3 },
+        invalid: { mode: "production", replicas: 0, extra: true }
+      },
+      order: {
+        schema: {
+          "$schema": "https://json-schema.org/draft/2020-12/schema",
+          title: "Order",
+          type: "object",
+          required: ["id", "shipment"],
+          properties: {
+            id: { type: "string", pattern: "^ORD-[0-9]+$" },
+            shipment: {
+              type: "array",
+              prefixItems: [
+                { type: "string", format: "date" },
+                { type: "string", enum: ["standard", "express"] },
+                { type: "number", minimum: 0 }
+              ],
+              items: false
+            }
+          },
+          additionalProperties: false
+        },
+        valid: { id: "ORD-1042", shipment: ["2026-11-05", "express", 12.5] },
+        invalid: { id: "ORD-x", shipment: ["not-a-date", "drone", -1, "extra"] }
+      }
+    };
+
+    var scriptPromises = {};
+    var meta6Promise = null;
+    var meta4Promise = null;
+    var cfworkerPromise = null;
+    var formatsPromise = null;
+
+    function loadScript(url, globalName) {
+      if (window[globalName]) return Promise.resolve(window[globalName]);
+      if (!scriptPromises[url]) {
+        scriptPromises[url] = new Promise(function (resolve, reject) {
+          var script = document.createElement("script");
+          script.src = url;
+          script.async = true;
+          script.onload = function () {
+            if (window[globalName]) resolve(window[globalName]);
+            else reject(new Error("Loaded " + url + " but " + globalName + " is missing."));
+          };
+          script.onerror = function () { reject(new Error("Could not load " + url)); };
+          document.head.appendChild(script);
+        }).catch(function (e) {
+          delete scriptPromises[url];
+          throw e;
+        });
+      }
+      return scriptPromises[url];
+    }
+
+    function fetchJson(url) {
+      return fetch(url).then(function (response) {
+        if (!response.ok) throw new Error("HTTP " + response.status + " for " + url);
+        return response.json();
+      });
+    }
+
+    function getDraft6Meta() {
+      if (!meta6Promise) {
+        meta6Promise = fetchJson("https://cdn.jsdelivr.net/npm/ajv@8.17.1/lib/refs/json-schema-draft-06.json").catch(function (e) { meta6Promise = null; throw e; });
+      }
+      return meta6Promise;
+    }
+
+    function getDraft4Meta() {
+      if (!meta4Promise) {
+        meta4Promise = fetchJson("https://cdn.jsdelivr.net/npm/ajv-draft-04@1.0.0/dist/refs/json-schema-draft-04.json").catch(function (e) { meta4Promise = null; throw e; });
+      }
+      return meta4Promise;
+    }
+
+    function getCfworker() {
+      if (!cfworkerPromise) {
+        cfworkerPromise = import("https://esm.sh/@cfworker/json-schema@4.1.4").catch(function (e) {
+          cfworkerPromise = null;
+          throw new Error("Could not load @cfworker/json-schema: " + (e && e.message ? e.message : String(e)));
+        });
+      }
+      return cfworkerPromise;
+    }
+
+    function getAddFormats() {
+      if (!formatsPromise) {
+        formatsPromise = import("https://esm.sh/ajv-formats@3.0.1").then(function (module) {
+          return module.default;
+        }).catch(function (e) {
+          formatsPromise = null;
+          throw e;
+        });
+      }
+      return formatsPromise;
+    }
+
+    function parseJson(text, label) {
+      try {
+        return JSON.parse(text);
+      } catch (e) {
+        var message = e && e.message ? e.message : String(e);
+        var loc = null;
+        if (window.JSONLocator) {
+          var located = JSONLocator.find(text);
+          if (located) {
+            message = located.message;
+            loc = JSONLocator.position(text, located.index);
+          }
+        }
+        throw new Error(label + " is not valid JSON: " + message +
+          (loc ? " (line " + loc.line + ", column " + loc.column + ")" : ""));
+      }
+    }
+
+    function hasDeclaredSchema(schema) {
+      return !!schema && typeof schema === "object" && !Array.isArray(schema) && typeof schema.$schema === "string";
+    }
+
+    function declaredDraft(schema) {
+      if (!hasDeclaredSchema(schema)) return null;
+      var value = schema.$schema;
+      if (/draft-04/.test(value)) return "draft4";
+      if (/draft-06/.test(value)) return "draft6";
+      if (/draft-07/.test(value)) return "draft7";
+      if (/2019-09/.test(value)) return "2019-09";
+      if (/2020-12/.test(value)) return "2020-12";
+      return null;
+    }
+
+    function stripDollarSchema(schema) {
+      if (!schema || typeof schema !== "object" || Array.isArray(schema)) return schema;
+      var clone = {};
+      Object.keys(schema).forEach(function (key) {
+        if (key !== "$schema") clone[key] = schema[key];
+      });
+      return clone;
+    }
+
+    function resolveDraft(schema) {
+      var requested = versionSel.value;
+      var declaredPresent = hasDeclaredSchema(schema);
+      var declared = declaredDraft(schema);
+      var schemaToUse = schema;
+      var mode = "auto-detected";
+      var note = "";
+
+      if (requested === "auto") {
+        if (!declared) {
+          schemaToUse = declaredPresent ? stripDollarSchema(schema) : schema;
+          mode = "defaulted";
+          note = declaredPresent ? "unrecognized $schema; using draft-07" : "no $schema; using draft-07";
+          return { draft: "draft7", schemaToUse: schemaToUse, mode: mode, note: note };
+        }
+        return { draft: declared, schemaToUse: schema, mode: "auto-detected", note: "" };
+      }
+
+      mode = "forced";
+      if (declaredPresent && declared !== requested) {
+        schemaToUse = stripDollarSchema(schema);
+        note = "declared " + (declared ? DRAFT_LABELS[declared] : "$schema") + " ignored";
+      }
+      return { draft: requested, schemaToUse: schemaToUse, mode: mode, note: note };
+    }
+
+    function normalizeAjvErrors(errors) {
+      return (errors || []).map(function (error) {
+        return {
+          path: error.instancePath || "/",
+          schemaPath: error.schemaPath || "",
+          keyword: error.keyword || "",
+          message: error.message || "",
+          params: error.params || null
+        };
+      });
+    }
+
+    function normalizeCfErrors(errors) {
+      return (errors || []).map(function (error) {
+        var location = error.instanceLocation || "#";
+        return {
+          path: location === "#" ? "/" : location.replace(/^#/, ""),
+          schemaPath: error.keywordLocation || "",
+          keyword: error.keyword || "",
+          message: (error.error || "").replace(/\s+/g, " ").trim(),
+          params: null
+        };
+      });
+    }
+
+    async function validateWithAjv(draft, schema, instance) {
+      var info = AJV_BUNDLES[draft];
+      var AjvClass = await loadScript(info.url, info.globalName);
+      var ajv = new AjvClass({ allErrors: true, strict: false, logger: false });
+
+      if (draft === "draft6") {
+        ajv.addMetaSchema(await getDraft6Meta());
+      }
+
+      var formatWarning = "";
+      try {
+        var addFormats = await getAddFormats();
+        addFormats(ajv);
+      } catch (e) {
+        formatWarning = "format checks unavailable";
+      }
+
+      var metaId = META_IDS[draft];
+      var schemaOk;
+      try {
+        schemaOk = ajv.validate(metaId, schema);
+      } catch (e) {
+        return { compileError: "Could not check the schema: " + (e && e.message ? e.message : String(e)), engine: info.label };
+      }
+      if (!schemaOk) {
+        return {
+          schemaInvalid: true,
+          schemaErrors: normalizeAjvErrors(ajv.errors),
+          engine: info.label,
+          formatWarning: formatWarning
+        };
+      }
+
+      var validate;
+      try {
+        validate = ajv.compile(schema);
+      } catch (e) {
+        return { compileError: e && e.message ? e.message : String(e), engine: info.label };
+      }
+
+      var valid = validate(instance);
+      return {
+        valid: !!valid,
+        errors: normalizeAjvErrors(validate.errors),
+        engine: info.label,
+        formatWarning: formatWarning
+      };
+    }
+
+    async function validateWithCfworker(schema, instance) {
+      var label = "@cfworker/json-schema";
+      if (typeof schema === "boolean") {
+        return {
+          schemaInvalid: true,
+          schemaErrors: [{ path: "/", schemaPath: "", keyword: "type", message: "draft-04 does not allow boolean schemas.", params: null }],
+          engine: label
+        };
+      }
+
+      var Validator = (await getCfworker()).Validator;
+      var meta = await getDraft4Meta();
+
+      var schemaValidator = new Validator(meta, "4", true);
+      var schemaResult;
+      try {
+        schemaResult = schemaValidator.validate(schema);
+      } catch (e) {
+        return { compileError: "Could not check the schema: " + (e && e.message ? e.message : String(e)), engine: label };
+      }
+      if (!schemaResult.valid) {
+        return { schemaInvalid: true, schemaErrors: normalizeCfErrors(schemaResult.errors), engine: label };
+      }
+
+      var result;
+      try {
+        result = new Validator(schema, "4", false).validate(instance);
+      } catch (e) {
+        return { compileError: e && e.message ? e.message : String(e), engine: label };
+      }
+      return { valid: result.valid, errors: normalizeCfErrors(result.errors), engine: label };
+    }
+
+    function clearResults() {
+      runSeq++;
+      lastReport = null;
+      errorsBody.innerHTML = "";
+      errorsWrap.classList.add("hidden");
+      errorsWrap.classList.remove("schema-mode");
+      rawDetails.classList.add("hidden");
+      rawErrors.textContent = "";
+      noErrors.textContent = "Run a validation to see results.";
+      noErrors.classList.remove("hidden");
+      summaryEl.textContent = "Paste a schema and an instance, or load an example.";
+      pathHeader.textContent = "Instance path";
+    }
+
+    function showError(message) {
+      clearResults();
+      statusBadge.className = "badge bad";
+      statusBadge.textContent = "error";
+      errorEl.textContent = message;
+      summaryEl.textContent = "No result.";
+      draftHint.textContent = "";
+    }
+
+    function renderRows(errors, kind) {
+      errorsBody.innerHTML = "";
+      var schemaMode = kind === "schema";
+      errorsWrap.classList.toggle("schema-mode", schemaMode);
+      pathHeader.textContent = schemaMode ? "Schema location" : "Instance path";
+      var limit = 200;
+
+      errors.slice(0, limit).forEach(function (error) {
+        var tr = document.createElement("tr");
+
+        var pathTd = document.createElement("td");
+        pathTd.className = "err-path";
+        pathTd.textContent = error.path || "/";
+
+        var keywordTd = document.createElement("td");
+        keywordTd.className = "err-keyword";
+        keywordTd.textContent = error.keyword || "—";
+
+        var messageTd = document.createElement("td");
+        messageTd.className = "err-msg";
+        messageTd.textContent = error.message || "";
+
+        var schemaTd = document.createElement("td");
+        schemaTd.className = "err-schema schema-col";
+        schemaTd.textContent = error.schemaPath || "";
+
+        tr.appendChild(pathTd);
+        tr.appendChild(keywordTd);
+        tr.appendChild(messageTd);
+        tr.appendChild(schemaTd);
+        errorsBody.appendChild(tr);
+      });
+
+      if (errors.length > limit) {
+        var noteTr = document.createElement("tr");
+        var noteTd = document.createElement("td");
+        noteTd.colSpan = 4;
+        noteTd.className = "hint";
+        noteTd.textContent = "Showing the first " + limit + " of " + errors.length + " errors. Use Copy report for everything.";
+        noteTr.appendChild(noteTd);
+        errorsBody.appendChild(noteTr);
+      }
+    }
+
+    function bytesOf(text) {
+      try { return new TextEncoder().encode(text).length; } catch (e) { return text.length; }
+    }
+
+    function renderResult(result, resolved, elapsed, schemaText, instanceText) {
+      var draftLabel = DRAFT_LABELS[resolved.draft];
+      var hintParts = ["draft " + draftLabel, resolved.mode];
+      if (resolved.note) hintParts.push(resolved.note);
+      if (resolved.draft === "draft6") hintParts.push("draft-07 engine for shared keywords");
+      if (result.formatWarning) hintParts.push(result.formatWarning);
+      hintParts.push(result.engine);
+      hintParts.push((Math.round(elapsed * 10) / 10) + " ms");
+      hintParts.push(bytesOf(schemaText) + " B schema");
+      hintParts.push(bytesOf(instanceText) + " B instance");
+      draftHint.textContent = hintParts.join(" · ");
+
+      if (result.compileError) {
+        statusBadge.className = "badge bad";
+        statusBadge.textContent = "compile error";
+        summaryEl.textContent = "The schema could not be compiled.";
+        noErrors.classList.add("hidden");
+        errorsWrap.classList.add("hidden");
+        rawDetails.classList.add("hidden");
+        errorEl.textContent = result.compileError;
+        lastReport = { draft: draftLabel, engine: result.engine, compiled: false, error: result.compileError };
+        return;
+      }
+
+      if (result.schemaInvalid) {
+        var schemaErrors = result.schemaErrors || [];
+        statusBadge.className = "badge bad";
+        statusBadge.textContent = "invalid schema";
+        summaryEl.textContent = "The schema is not a valid " + draftLabel + " schema.";
+        noErrors.classList.add("hidden");
+        errorsWrap.classList.remove("hidden");
+        renderRows(schemaErrors, "schema");
+        rawDetails.classList.remove("hidden");
+        rawErrors.textContent = JSON.stringify(schemaErrors, null, 2);
+        lastReport = {
+          draft: draftLabel,
+          engine: result.engine,
+          schemaValid: false,
+          errors: schemaErrors
+        };
+        return;
+      }
+
+      var errors = result.errors || [];
+      lastReport = {
+        draft: draftLabel,
+        engine: result.engine,
+        valid: !!result.valid,
+        errors: errors
+      };
+
+      if (result.valid) {
+        statusBadge.className = "badge ok";
+        statusBadge.textContent = "valid";
+        summaryEl.textContent = "The instance matches the schema.";
+        noErrors.textContent = "No errors. The instance matches the schema.";
+        noErrors.classList.remove("hidden");
+        errorsWrap.classList.add("hidden");
+        errorsWrap.classList.remove("schema-mode");
+        rawDetails.classList.add("hidden");
+        return;
+      }
+
+      statusBadge.className = "badge bad";
+      statusBadge.textContent = errors.length + " error(s)";
+      summaryEl.textContent = "The instance does not match the schema.";
+      noErrors.classList.add("hidden");
+      errorsWrap.classList.remove("hidden");
+      renderRows(errors, "instance");
+      rawDetails.classList.remove("hidden");
+      rawErrors.textContent = JSON.stringify(errors, null, 2);
+    }
+
+    async function run() {
+      var seq = ++runSeq;
+      errorEl.textContent = "";
+
+      var schemaText = schemaInput.value;
+      var instanceText = instanceInput.value;
+      if (!schemaText.trim() || !instanceText.trim()) {
+        clearResults();
+        statusBadge.className = "badge muted";
+        statusBadge.textContent = !schemaText.trim() ? "waiting for schema" : "waiting for instance";
+        draftHint.textContent = "";
+        return;
+      }
+
+      var schema, instance;
+      try {
+        schema = parseJson(schemaText, "Schema");
+      } catch (e) {
+        showError(e.message);
+        statusBadge.textContent = "invalid schema";
+        return;
+      }
+      try {
+        instance = parseJson(instanceText, "Instance");
+      } catch (e) {
+        showError(e.message);
+        statusBadge.textContent = "invalid instance";
+        return;
+      }
+
+      var resolved = resolveDraft(schema);
+      statusBadge.className = "badge muted";
+      statusBadge.textContent = "validating…";
+      draftHint.textContent = "draft " + DRAFT_LABELS[resolved.draft] + " · " + resolved.mode +
+        (resolved.note ? " · " + resolved.note : "");
+
+      var started = performance.now();
+      var result;
+      try {
+        result = resolved.draft === "draft4"
+          ? await validateWithCfworker(resolved.schemaToUse, instance)
+          : await validateWithAjv(resolved.draft, resolved.schemaToUse, instance);
+      } catch (e) {
+        if (seq !== runSeq) return;
+        showError("Validation failed: " + (e && e.message ? e.message : String(e)));
+        return;
+      }
+      if (seq !== runSeq) return;
+      renderResult(result, resolved, performance.now() - started, schemaText, instanceText);
+    }
+
+    function schedule() {
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(run, 350);
+    }
+
+    function loadExample(kind) {
+      var example = EXAMPLES[exampleSel.value];
+      schemaInput.value = JSON.stringify(example.schema, null, 2);
+      instanceInput.value = JSON.stringify(kind === "invalid" ? example.invalid : example.valid, null, 2);
+      versionSel.value = "auto";
+      run();
+    }
+
+    function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) return navigator.clipboard.writeText(text);
+      var area = document.createElement("textarea");
+      area.value = text;
+      area.style.position = "fixed";
+      area.style.opacity = "0";
+      document.body.appendChild(area);
+      area.select();
+      document.execCommand("copy");
+      area.remove();
+      return Promise.resolve();
+    }
+
+    document.getElementById("validateBtn").addEventListener("click", run);
+    document.getElementById("loadValidBtn").addEventListener("click", function () { loadExample("valid"); });
+    document.getElementById("loadInvalidBtn").addEventListener("click", function () { loadExample("invalid"); });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      schemaInput.value = "";
+      instanceInput.value = "";
+      errorEl.textContent = "";
+      clearResults();
+      statusBadge.className = "badge muted";
+      statusBadge.textContent = "waiting for input";
+      draftHint.textContent = "";
+      schemaInput.focus();
+    });
+    copyErrorsBtn.addEventListener("click", function () {
+      if (!lastReport) return;
+      var btn = this;
+      copyText(JSON.stringify(lastReport, null, 2)).then(function () {
+        btn.textContent = "Copied!";
+        setTimeout(function () { btn.textContent = "Copy report"; }, 1200);
+      });
+    });
+
+    [schemaInput, instanceInput].forEach(function (input) {
+      input.addEventListener("input", function () {
+        if (liveChk.checked) schedule();
+      });
+    });
+    versionSel.addEventListener("change", run);
+    liveChk.addEventListener("change", function () {
+      if (liveChk.checked && schemaInput.value.trim() && instanceInput.value.trim()) run();
+    });
+    document.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        run();
+      }
+    });
+
+    clearResults();
+  </script>
+</body>
+</html>
