@@ -1,0 +1,336 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>image resizer / converter</title>
+  <meta name="description" content="Resize, compress and convert images to JPEG, PNG, WebP or AVIF locally in your browser.">
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    #dropZone { border: 2px dashed var(--border); border-radius: 10px; padding: 1.5rem; text-align: center; cursor: pointer; background: #fff; }
+    #dropZone.dragging { border-color: var(--accent); background: #faf8ff; }
+    .previewBox { background: #fff; border: 1px solid var(--border); border-radius: 8px; padding: 0.75rem; text-align: center; }
+    .previewBox img { max-width: 100%; max-height: 16rem; border-radius: 4px; }
+    .previewBox .hint { margin-top: 0.5rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>image resizer / converter</h1>
+    <p class="subtitle">Resize, compress and convert images locally with canvas. Nothing is uploaded.</p>
+
+    <div id="dropZone" role="button" tabindex="0">
+      <strong>Drop an image here</strong> or click to choose a file
+      <div class="hint" style="margin-top:0.25rem">PNG, JPEG, WebP, GIF (first frame), AVIF or SVG</div>
+      <input type="file" id="fileInput" accept="image/*" class="hidden">
+    </div>
+
+    <div class="grid">
+      <div class="previewBox">
+        <div class="hint">Original</div>
+        <img id="originalPreview" alt="Original preview" class="hidden">
+        <div class="hint" id="originalInfo">No image loaded.</div>
+      </div>
+      <div class="previewBox">
+        <div class="hint">Output</div>
+        <img id="outputPreview" alt="Output preview" class="hidden">
+        <div class="hint" id="outputInfo">No output yet.</div>
+      </div>
+    </div>
+
+    <div class="row" style="margin-top:1rem">
+      <label for="width" style="margin:0">Max width</label>
+      <input type="number" id="width" min="1" max="20000" placeholder="auto" style="width:7rem">
+      <label for="height" style="margin:0">Max height</label>
+      <input type="number" id="height" min="1" max="20000" placeholder="auto" style="width:7rem">
+      <label><input type="checkbox" id="preserveChk" checked> Preserve aspect ratio</label>
+      <label><input type="checkbox" id="noEnlargeChk" checked> Don't enlarge</label>
+    </div>
+
+    <div class="row">
+      <label for="formatSel" style="margin:0">Format</label>
+      <select id="formatSel">
+        <option value="original" selected>Keep original</option>
+        <option value="image/jpeg">JPEG</option>
+        <option value="image/png">PNG</option>
+        <option value="image/webp">WebP</option>
+        <option value="image/avif">AVIF</option>
+      </select>
+
+      <label for="quality" style="margin:0 0 0 0.75rem">Quality</label>
+      <input type="range" id="quality" min="0.1" max="1" step="0.05" value="0.85" style="width:9rem">
+      <span class="hint" id="qualityValue">85%</span>
+
+      <label for="background" style="margin:0 0 0 0.75rem">JPEG background</label>
+      <input type="color" id="background" value="#ffffff" style="width:3rem;height:2.4rem;padding:0.1rem">
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="statusBadge" class="badge muted">waiting for image</span>
+      <span id="statusHint" class="hint"></span>
+    </div>
+    <div class="hint" id="warning" style="color:var(--warn)"></div>
+    <div class="error" id="error" role="alert"></div>
+
+    <div class="row">
+      <button id="processBtn" type="button" disabled>Process</button>
+      <button id="downloadBtn" type="button" class="secondary" disabled>Download</button>
+      <span class="spacer"></span>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+    </div>
+
+    <footer>
+      EXIF orientation is honored where the browser supports it. Animated GIFs become a single frame.
+      AVIF support depends on the browser.
+    </footer>
+  </main>
+
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var dropZone = document.getElementById("dropZone");
+    var fileInput = document.getElementById("fileInput");
+    var originalPreview = document.getElementById("originalPreview");
+    var outputPreview = document.getElementById("outputPreview");
+    var originalInfo = document.getElementById("originalInfo");
+    var outputInfo = document.getElementById("outputInfo");
+    var widthInput = document.getElementById("width");
+    var heightInput = document.getElementById("height");
+    var preserveChk = document.getElementById("preserveChk");
+    var noEnlargeChk = document.getElementById("noEnlargeChk");
+    var formatSel = document.getElementById("formatSel");
+    var quality = document.getElementById("quality");
+    var qualityValue = document.getElementById("qualityValue");
+    var background = document.getElementById("background");
+    var statusBadge = document.getElementById("statusBadge");
+    var statusHint = document.getElementById("statusHint");
+    var warningEl = document.getElementById("warning");
+    var errorEl = document.getElementById("error");
+    var processBtn = document.getElementById("processBtn");
+    var downloadBtn = document.getElementById("downloadBtn");
+
+    var source = null;
+    var sourceFile = null;
+    var sourceUrl = null;
+    var outputBlob = null;
+    var outputUrl = null;
+    var outputName = "";
+    var processSeq = 0;
+
+    function showError(message) {
+      errorEl.textContent = message;
+      statusBadge.className = "badge bad";
+      statusBadge.textContent = "error";
+      statusHint.textContent = "";
+    }
+
+    function clearOutput() {
+      if (outputUrl) URL.revokeObjectURL(outputUrl);
+      outputUrl = null;
+      outputBlob = null;
+      outputName = "";
+      outputPreview.classList.add("hidden");
+      outputPreview.removeAttribute("src");
+      outputInfo.textContent = "No output yet.";
+      downloadBtn.disabled = true;
+    }
+
+    function clearAll() {
+      clearOutput();
+      if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+      sourceUrl = null;
+      source = null;
+      sourceFile = null;
+      originalPreview.classList.add("hidden");
+      originalPreview.removeAttribute("src");
+      originalInfo.textContent = "No image loaded.";
+      errorEl.textContent = "";
+      warningEl.textContent = "";
+      statusBadge.className = "badge muted";
+      statusBadge.textContent = "waiting for image";
+      statusHint.textContent = "";
+      processBtn.disabled = true;
+      fileInput.value = "";
+      widthInput.value = "";
+      heightInput.value = "";
+      formatSel.value = "original";
+    }
+
+    function loadAsImage(file) {
+      return new Promise(function (resolve, reject) {
+        var image = new Image();
+        var url = URL.createObjectURL(file);
+        image.onload = function () {
+          URL.revokeObjectURL(url);
+          resolve(image);
+        };
+        image.onerror = function () {
+          URL.revokeObjectURL(url);
+          reject(new Error("Could not decode that image."));
+        };
+        image.src = url;
+      });
+    }
+
+    async function loadFile(file) {
+      if (!file) return;
+      if (!/^image\//.test(file.type)) {
+        showError("That file is not an image.");
+        return;
+      }
+      clearOutput();
+      try {
+        if (typeof createImageBitmap === "function") {
+          try {
+            source = await createImageBitmap(file, { imageOrientation: "from-image" });
+          } catch (e) {
+            source = await loadAsImage(file);
+          }
+        } else {
+          source = await loadAsImage(file);
+        }
+        sourceFile = file;
+        if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+        sourceUrl = URL.createObjectURL(file);
+        originalPreview.src = sourceUrl;
+        originalPreview.classList.remove("hidden");
+        originalInfo.textContent = source.width + " × " + source.height + " px · " +
+          (file.type || "unknown") + " · " + Toolkit.formatBytes(file.size);
+        processBtn.disabled = false;
+        widthInput.value = source.width;
+        heightInput.value = source.height;
+        errorEl.textContent = "";
+        process();
+      } catch (e) {
+        showError(e && e.message ? e.message : String(e));
+      }
+    }
+
+    function targetSize() {
+      var w = source.width, h = source.height;
+      var maxW = Number(widthInput.value) || 0;
+      var maxH = Number(heightInput.value) || 0;
+      if (!maxW && !maxH) return { width: w, height: h };
+
+      if (preserveChk.checked) {
+        var scaleW = maxW ? maxW / w : Infinity;
+        var scaleH = maxH ? maxH / h : Infinity;
+        var scale = Math.min(scaleW, scaleH);
+        if (!isFinite(scale)) scale = 1;
+        if (noEnlargeChk.checked) scale = Math.min(scale, 1);
+        return {
+          width: Math.max(1, Math.round(w * scale)),
+          height: Math.max(1, Math.round(h * scale))
+        };
+      }
+
+      var targetW = maxW || Math.round(w * (maxH / h));
+      var targetH = maxH || Math.round(h * (maxW / w));
+      if (noEnlargeChk.checked) {
+        var shrink = Math.min(1, w / targetW, h / targetH);
+        targetW = Math.max(1, Math.round(targetW * shrink));
+        targetH = Math.max(1, Math.round(targetH * shrink));
+      }
+      return { width: Math.max(1, Math.round(targetW)), height: Math.max(1, Math.round(targetH)) };
+    }
+
+    function outputMime() {
+      if (formatSel.value !== "original") return formatSel.value;
+      var type = sourceFile && sourceFile.type ? sourceFile.type : "image/png";
+      if (/^image\/(png|jpeg|webp|avif)$/.test(type)) return type;
+      return "image/png";
+    }
+
+    function extensionFor(mime) {
+      if (mime === "image/jpeg") return "jpg";
+      if (mime === "image/webp") return "webp";
+      if (mime === "image/avif") return "avif";
+      return "png";
+    }
+
+    async function process() {
+      if (!source) return;
+      var mySeq = ++processSeq;
+      errorEl.textContent = "";
+      warningEl.textContent = "";
+      var size = targetSize();
+      var mime = outputMime();
+      var canvas = document.createElement("canvas");
+      canvas.width = size.width;
+      canvas.height = size.height;
+      var ctx = canvas.getContext("2d");
+      if (mime === "image/jpeg") {
+        ctx.fillStyle = background.value || "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+      }
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+
+      var qualityValueNumber = Number(quality.value);
+      var blob = await new Promise(function (resolve) {
+        canvas.toBlob(resolve, mime, mime === "image/png" ? undefined : qualityValueNumber);
+      });
+      if (mySeq !== processSeq) return;
+      if (!blob) {
+        showError("The browser could not encode that format.");
+        return;
+      }
+      if (blob.type !== mime) {
+        warningEl.textContent = "The browser encoded this as " + blob.type + " instead of " + mime + ".";
+        mime = blob.type;
+      }
+
+      clearOutput();
+      outputBlob = blob;
+      outputUrl = URL.createObjectURL(blob);
+      outputPreview.src = outputUrl;
+      outputPreview.classList.remove("hidden");
+      outputInfo.textContent = size.width + " × " + size.height + " px · " + mime + " · " + Toolkit.formatBytes(blob.size);
+      outputName = "image-" + size.width + "x" + size.height + "." + extensionFor(mime);
+      downloadBtn.disabled = false;
+      statusBadge.className = "badge ok";
+      statusBadge.textContent = "processed";
+      statusHint.textContent = source.width + "×" + source.height + " → " + size.width + "×" + size.height + " · " +
+        Math.round((1 - blob.size / (sourceFile ? sourceFile.size : blob.size)) * 100) + "% size change";
+    }
+
+    var schedule = Toolkit.debounce(function () { if (source) process(); }, 220);
+
+    dropZone.addEventListener("click", function () { fileInput.click(); });
+    dropZone.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInput.click(); }
+    });
+    dropZone.addEventListener("dragover", function (e) { e.preventDefault(); dropZone.classList.add("dragging"); });
+    dropZone.addEventListener("dragleave", function () { dropZone.classList.remove("dragging"); });
+    dropZone.addEventListener("drop", function (e) {
+      e.preventDefault();
+      dropZone.classList.remove("dragging");
+      loadFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener("change", function () { loadFile(fileInput.files[0]); });
+
+    processBtn.addEventListener("click", process);
+    document.getElementById("clearBtn").addEventListener("click", clearAll);
+    downloadBtn.addEventListener("click", function () {
+      if (outputBlob) Toolkit.download(outputBlob, outputName || "image.png");
+    });
+
+    [widthInput, heightInput].forEach(function (el) { el.addEventListener("input", schedule); });
+    [preserveChk, noEnlargeChk, formatSel, background].forEach(function (el) { el.addEventListener("change", schedule); });
+    quality.addEventListener("input", function () {
+      qualityValue.textContent = Math.round(Number(quality.value) * 100) + "%";
+      schedule();
+    });
+    document.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        process();
+      }
+    });
+
+    qualityValue.textContent = Math.round(Number(quality.value) * 100) + "%";
+  </script>
+</body>
+</html>

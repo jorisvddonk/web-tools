@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>unicode inspector</title>
+  <meta name="description" content="Inspect Unicode code points, UTF-8/UTF-16 bytes, graphemes, invisible characters and normalization forms.">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="wide">
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>unicode inspector</h1>
+    <p class="subtitle">Inspect code points, UTF-8/UTF-16 bytes, graphemes, invisible characters and normalization.</p>
+
+    <label for="input">Text</label>
+    <textarea id="input" class="tall" placeholder="Type or paste text, including emoji or invisible characters…" spellcheck="false"></textarea>
+
+    <div class="row">
+      <button id="exampleBtn" type="button" class="secondary">Load example</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+      <span class="spacer"></span>
+      <button id="copyEscapeBtn" type="button" class="secondary">Copy escaped output</button>
+    </div>
+
+    <div class="grid" style="margin-top:1rem">
+      <section class="card" style="margin-top:0">
+        <h2>Summary</h2>
+        <table>
+          <tbody id="summaryBody"></tbody>
+        </table>
+      </section>
+      <section class="card" style="margin-top:0">
+        <h2>Normalization <span class="hint" style="font-weight:400">(click to apply)</span></h2>
+        <div class="row" id="normalization" style="margin-top:0"></div>
+        <div class="hint" id="normalizationHint" style="margin-top:0.5rem"></div>
+      </section>
+    </div>
+
+    <section class="card">
+      <h2>Escaped output</h2>
+      <div class="row" style="margin-top:0">
+        <label for="escapeSel" class="hint" style="margin:0;font-weight:400">Format</label>
+        <select id="escapeSel" aria-label="Escape format">
+          <option value="js" selected>JavaScript \u escapes</option>
+          <option value="json">JSON \uXXXX escapes</option>
+          <option value="html">HTML entities</option>
+          <option value="utf8">UTF-8 hex bytes</option>
+        </select>
+      </div>
+      <pre class="out" id="escapedOut" style="margin-top:0.75rem"></pre>
+    </section>
+
+    <section class="card">
+      <h2>Code points</h2>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th style="width:4rem">Char</th><th style="width:7rem">Code point</th><th style="width:11rem">UTF-8</th><th style="width:8rem">UTF-16</th><th>Name / notes</th></tr></thead>
+          <tbody id="codePointsBody"></tbody>
+        </table>
+      </div>
+      <div class="hint" id="codePointsHint"></div>
+    </section>
+  </main>
+
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var input = document.getElementById("input");
+    var summaryBody = document.getElementById("summaryBody");
+    var normalization = document.getElementById("normalization");
+    var normalizationHint = document.getElementById("normalizationHint");
+    var escapeSel = document.getElementById("escapeSel");
+    var escapedOut = document.getElementById("escapedOut");
+    var codePointsBody = document.getElementById("codePointsBody");
+    var codePointsHint = document.getElementById("codePointsHint");
+
+    var NAMES = {
+      0x0000: "NULL",
+      0x0009: "CHARACTER TABULATION",
+      0x000A: "LINE FEED",
+      0x000D: "CARRIAGE RETURN",
+      0x0020: "SPACE",
+      0x00A0: "NO-BREAK SPACE",
+      0x00AD: "SOFT HYPHEN",
+      0x034F: "COMBINING GRAPHEME JOINER",
+      0x061C: "ARABIC LETTER MARK",
+      0x180E: "MONGOLIAN VOWEL SEPARATOR",
+      0x200B: "ZERO WIDTH SPACE",
+      0x200C: "ZERO WIDTH NON-JOINER",
+      0x200D: "ZERO WIDTH JOINER",
+      0x200E: "LEFT-TO-RIGHT MARK",
+      0x200F: "RIGHT-TO-LEFT MARK",
+      0x2028: "LINE SEPARATOR",
+      0x2029: "PARAGRAPH SEPARATOR",
+      0x202A: "LEFT-TO-RIGHT EMBEDDING",
+      0x202B: "RIGHT-TO-LEFT EMBEDDING",
+      0x202C: "POP DIRECTIONAL FORMATTING",
+      0x202D: "LEFT-TO-RIGHT OVERRIDE",
+      0x202E: "RIGHT-TO-LEFT OVERRIDE",
+      0x2060: "WORD JOINER",
+      0x2066: "LEFT-TO-RIGHT ISOLATE",
+      0x2067: "RIGHT-TO-LEFT ISOLATE",
+      0x2068: "FIRST STRONG ISOLATE",
+      0x2069: "POP DIRECTIONAL ISOLATE",
+      0xFEFF: "ZERO WIDTH NO-BREAK SPACE (BOM)",
+      0xFFFD: "REPLACEMENT CHARACTER"
+    };
+
+    function hex4(code) { return "U+" + code.toString(16).toUpperCase().padStart(4, "0"); }
+    function bytesHex(text) {
+      return Array.from(new TextEncoder().encode(text)).map(function (byte) {
+        return byte.toString(16).toUpperCase().padStart(2, "0");
+      }).join(" ");
+    }
+
+    function isInvisible(code, char) {
+      if (code < 0x20 || (code >= 0x7F && code <= 0x9F)) return true;
+      if (code === 0xFEFF || code === 0x00A0 || code === 0x00AD) return true;
+      try {
+        if (/\p{Cf}/u.test(char) || /\p{M}/u.test(char)) return true;
+      } catch (e) { /* older browser */ }
+      return false;
+    }
+
+    function visibleChar(code, char) {
+      if (code === 0x20) return "␠";
+      if (code === 0x09) return "⇥";
+      if (code === 0x0A) return "↵";
+      if (code === 0x0D) return "␍";
+      if (code === 0x00A0) return "⍽";
+      if (isInvisible(code, char)) return "·";
+      return char;
+    }
+
+    function nameOf(code, char) {
+      if (NAMES[code]) return NAMES[code];
+      try {
+        if (/\p{Extended_Pictographic}/u.test(char)) return "Emoji / pictograph";
+        if (/\p{M}/u.test(char)) return "Combining mark";
+        if (/\p{Cf}/u.test(char)) return "Format character";
+        if (/\p{Cc}/u.test(char)) return "Control character";
+        if (/\p{Zs}/u.test(char)) return "Space separator";
+        if (/\p{Zl}/u.test(char)) return "Line separator";
+        if (/\p{Zp}/u.test(char)) return "Paragraph separator";
+      } catch (e) { /* older browser */ }
+      return "—";
+    }
+
+    function graphemeCount(text) {
+      if (window.Intl && Intl.Segmenter) {
+        var segmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+        var count = 0;
+        for (var item of segmenter.segment(text)) count++;
+        return count;
+      }
+      return Array.from(text).length;
+    }
+
+    function setSummary(text) {
+      var codePoints = Array.from(text);
+      var units = text.length;
+      var bytes = new TextEncoder().encode(text).length;
+      var invisible = codePoints.filter(function (char) {
+        var code = char.codePointAt(0);
+        return isInvisible(code, char);
+      }).length;
+      var rows = [
+        ["Graphemes", graphemeCount(text)],
+        ["Code points", codePoints.length],
+        ["UTF-16 units", units],
+        ["UTF-8 bytes", bytes],
+        ["Invisible / combining", invisible]
+      ];
+      summaryBody.innerHTML = "";
+      rows.forEach(function (row) {
+        var tr = document.createElement("tr");
+        var name = document.createElement("td");
+        name.textContent = row[0];
+        var value = document.createElement("td");
+        value.className = "mono";
+        value.textContent = row[1];
+        tr.appendChild(name);
+        tr.appendChild(value);
+        summaryBody.appendChild(tr);
+      });
+    }
+
+    function renderNormalization(text) {
+      normalization.innerHTML = "";
+      normalizationHint.textContent = "";
+      var forms = [
+        ["NFC", text.normalize("NFC")],
+        ["NFD", text.normalize("NFD")],
+        ["NFKC", text.normalize("NFKC")],
+        ["NFKD", text.normalize("NFKD")]
+      ];
+      var changed = false;
+      forms.forEach(function (form) {
+        var same = form[1] === text;
+        if (!same) changed = true;
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "secondary tiny";
+        btn.textContent = form[0] + (same ? " · same" : " · differs");
+        btn.addEventListener("click", function () {
+          input.value = form[1];
+          render();
+        });
+        normalization.appendChild(btn);
+      });
+      normalizationHint.textContent = changed ? "At least one form differs from the input." : "All normalization forms match the input.";
+    }
+
+    function escapeJs(text) {
+      return Array.from(text).map(function (char) {
+        var code = char.codePointAt(0);
+        if (code <= 0xFFFF) return "\\u" + code.toString(16).toUpperCase().padStart(4, "0");
+        return "\\u{" + code.toString(16).toUpperCase() + "}";
+      }).join("");
+    }
+
+    function escapeJson(text) {
+      var out = "";
+      for (var i = 0; i < text.length; i++) {
+        var code = text.charCodeAt(i);
+        if (code === 0x22) out += '\\"';
+        else if (code === 0x5C) out += "\\\\";
+        else if (code >= 0x20 && code <= 0x7E) out += text[i];
+        else out += "\\u" + code.toString(16).toUpperCase().padStart(4, "0");
+      }
+      return out;
+    }
+
+    function escapeHtml(text) {
+      return Array.from(text).map(function (char) {
+        var code = char.codePointAt(0);
+        if (code >= 0x20 && code <= 0x7E && !/[&<>"']/.test(char)) return char;
+        return "&#x" + code.toString(16).toUpperCase() + ";";
+      }).join("");
+    }
+
+    function renderEscaped(text) {
+      if (!text) { escapedOut.textContent = ""; return; }
+      if (escapeSel.value === "js") escapedOut.textContent = escapeJs(text);
+      else if (escapeSel.value === "json") escapedOut.textContent = escapeJson(text);
+      else if (escapeSel.value === "html") escapedOut.textContent = escapeHtml(text);
+      else escapedOut.textContent = bytesHex(text);
+    }
+
+    function renderCodePoints(text) {
+      codePointsBody.innerHTML = "";
+      var chars = Array.from(text);
+      var limit = 1000;
+      chars.slice(0, limit).forEach(function (char) {
+        var code = char.codePointAt(0);
+        var tr = document.createElement("tr");
+
+        var charTd = document.createElement("td");
+        charTd.className = "mono";
+        charTd.textContent = visibleChar(code, char);
+        charTd.title = isInvisible(code, char) ? "Invisible or combining character" : char;
+
+        var codeTd = document.createElement("td");
+        codeTd.className = "mono";
+        codeTd.textContent = hex4(code);
+
+        var utf8Td = document.createElement("td");
+        utf8Td.className = "mono";
+        utf8Td.textContent = bytesHex(char);
+
+        var utf16Td = document.createElement("td");
+        utf16Td.className = "mono";
+        utf16Td.textContent = Array.from({ length: char.length }, function (_, index) {
+          return char.charCodeAt(index).toString(16).toUpperCase().padStart(4, "0");
+        }).join(" ");
+
+        var nameTd = document.createElement("td");
+        nameTd.textContent = nameOf(code, char);
+
+        tr.appendChild(charTd);
+        tr.appendChild(codeTd);
+        tr.appendChild(utf8Td);
+        tr.appendChild(utf16Td);
+        tr.appendChild(nameTd);
+        codePointsBody.appendChild(tr);
+      });
+
+      if (chars.length > limit) codePointsHint.textContent = "Showing the first " + limit + " of " + chars.length + " code points.";
+      else codePointsHint.textContent = chars.length + " code point" + (chars.length === 1 ? "" : "s") + ".";
+    }
+
+    function render() {
+      var text = input.value;
+      setSummary(text);
+      renderNormalization(text);
+      renderEscaped(text);
+      renderCodePoints(text);
+    }
+
+    var schedule = Toolkit.debounce(render, 180);
+
+    document.getElementById("exampleBtn").addEventListener("click", function () {
+      input.value = "café ☕ 👩‍💻\u200B\n\u00A0combining: e\u0301";
+      render();
+    });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      input.value = "";
+      render();
+      input.focus();
+    });
+    document.getElementById("copyEscapeBtn").addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(escapedOut.textContent).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    input.addEventListener("input", schedule);
+    escapeSel.addEventListener("change", function () { renderEscaped(input.value); });
+
+    render();
+  </script>
+</body>
+</html>

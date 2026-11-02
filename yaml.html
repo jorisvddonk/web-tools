@@ -1,0 +1,228 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>yaml ↔ json converter</title>
+  <meta name="description" content="Convert YAML to JSON and JSON to YAML in your browser, with validation and multi-document support.">
+  <link rel="stylesheet" href="./style.css">
+  <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+</head>
+<body>
+  <main>
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>yaml &harr; json converter</h1>
+    <p class="subtitle">Convert between YAML and JSON with validation. Multi-document YAML is supported.</p>
+
+    <div class="row" style="margin-top:0">
+      <label for="direction" style="margin:0">Direction</label>
+      <select id="direction" aria-label="Conversion direction">
+        <option value="yaml2json" selected>YAML &rarr; JSON</option>
+        <option value="json2yaml">JSON &rarr; YAML</option>
+      </select>
+      <span class="spacer"></span>
+      <button id="exampleBtn" type="button" class="secondary">Load example</button>
+    </div>
+
+    <label for="input">Input</label>
+    <textarea id="input" class="tall" spellcheck="false"></textarea>
+
+    <div class="opts">
+      <label><input type="checkbox" id="liveChk" checked> Convert live</label>
+      <label><input type="checkbox" id="sortChk"> Sort keys</label>
+      <label>Indent
+        <select id="indentSel" aria-label="Indent width" style="min-height:1.8rem;padding:0.1rem 0.4rem">
+          <option value="2" selected>2</option>
+          <option value="4">4</option>
+        </select>
+      </label>
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="statusBadge" class="badge muted">waiting for input</span>
+      <span id="statusHint" class="hint"></span>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+
+    <label for="output">Output</label>
+    <textarea id="output" readonly spellcheck="false"></textarea>
+    <div class="row">
+      <button id="convertBtn" type="button">Convert</button>
+      <button id="swapBtn" type="button" class="secondary" title="Move the output back into the input">Swap</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+      <span class="spacer"></span>
+      <button id="copyBtn" type="button" class="secondary">Copy output</button>
+    </div>
+    <div class="stats" id="stats"></div>
+  </main>
+
+  <script src="./json-locator.js"></script>
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var input = document.getElementById("input");
+    var output = document.getElementById("output");
+    var direction = document.getElementById("direction");
+    var liveChk = document.getElementById("liveChk");
+    var sortChk = document.getElementById("sortChk");
+    var indentSel = document.getElementById("indentSel");
+    var statusBadge = document.getElementById("statusBadge");
+    var statusHint = document.getElementById("statusHint");
+    var errorEl = document.getElementById("error");
+    var statsEl = document.getElementById("stats");
+
+    var EXAMPLE = [
+      "service: web-tools",
+      "replicas: 3",
+      "image: ghcr.io/jorisvddonk/web-tools:latest",
+      "env:",
+      "  - name: LOG_LEVEL",
+      "    value: info",
+      "  - name: PORT",
+      "    value: \"8080\"",
+      "resources:",
+      "  limits:",
+      "    cpu: 500m",
+      "    memory: 256Mi",
+      "labels:",
+      "  app: web-tools",
+      "  tier: frontend"
+    ].join("\n");
+
+    var timer = null;
+
+    function sortDeep(value) {
+      if (Array.isArray(value)) return value.map(sortDeep);
+      if (Object.prototype.toString.call(value) === "[object Date]") return value;
+      if (value && typeof value === "object") {
+        var out = Object.create(null);
+        Object.keys(value).sort().forEach(function (key) { out[key] = sortDeep(value[key]); });
+        return out;
+      }
+      return value;
+    }
+
+    function updateStats() {
+      statsEl.textContent =
+        "input: " + input.value.length + " chars · output: " + output.value.length + " chars";
+    }
+
+    function clearOutput() {
+      output.value = "";
+      updateStats();
+    }
+
+    function setBadge(kind, label, hint) {
+      statusBadge.className = "badge " + kind;
+      statusBadge.textContent = label;
+      statusHint.textContent = hint || "";
+    }
+
+    function yamlError(error) {
+      var reason = error.reason || error.message || String(error);
+      if (error.mark && typeof error.mark.line === "number") {
+        return reason + " (line " + (error.mark.line + 1) + ", column " + (error.mark.column + 1) + ")";
+      }
+      return reason;
+    }
+
+    function jsonError(text, error) {
+      var message = error && error.message ? error.message : String(error);
+      if (window.JSONLocator) {
+        var located = JSONLocator.find(text);
+        if (located) {
+          var loc = JSONLocator.position(text, located.index);
+          return located.message + " (line " + loc.line + ", column " + loc.column + ")";
+        }
+      }
+      return message;
+    }
+
+    function convert() {
+      errorEl.textContent = "";
+      if (!input.value.trim()) {
+        clearOutput();
+        setBadge("muted", "waiting for input", "");
+        return;
+      }
+      if (typeof jsyaml === "undefined") {
+        errorEl.textContent = "js-yaml did not load. Check your network connection and reload.";
+        setBadge("bad", "library unavailable", "");
+        return;
+      }
+
+      var indent = Number(indentSel.value);
+      try {
+        if (direction.value === "yaml2json") {
+          var documents = jsyaml.loadAll(input.value);
+          var value = documents.length === 1 ? documents[0] : documents;
+          if (sortChk.checked) value = sortDeep(value);
+          var json = JSON.stringify(value, null, indent);
+          if (json === undefined) throw new Error("That YAML value cannot be represented as JSON.");
+          output.value = json;
+          setBadge("ok", "valid YAML", documents.length + " document" + (documents.length === 1 ? "" : "s") + " → JSON");
+        } else {
+          var parsed = JSON.parse(input.value);
+          if (sortChk.checked) parsed = sortDeep(parsed);
+          output.value = jsyaml.dump(parsed, {
+            indent: indent,
+            sortKeys: sortChk.checked,
+            lineWidth: 100,
+            noRefs: true
+          });
+          setBadge("ok", "valid JSON", "converted to YAML");
+        }
+        updateStats();
+      } catch (e) {
+        clearOutput();
+        setBadge("bad", "conversion failed", "");
+        if (direction.value === "yaml2json") errorEl.textContent = yamlError(e);
+        else errorEl.textContent = jsonError(input.value, e);
+      }
+    }
+
+    var schedule = Toolkit.debounce(convert, 180);
+
+    document.getElementById("convertBtn").addEventListener("click", convert);
+    document.getElementById("exampleBtn").addEventListener("click", function () {
+      direction.value = "yaml2json";
+      input.value = EXAMPLE;
+      convert();
+    });
+    document.getElementById("swapBtn").addEventListener("click", function () {
+      if (!output.value) return;
+      input.value = output.value;
+      direction.value = direction.value === "yaml2json" ? "json2yaml" : "yaml2json";
+      convert();
+      input.focus();
+    });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      input.value = "";
+      errorEl.textContent = "";
+      clearOutput();
+      setBadge("muted", "waiting for input", "");
+      input.focus();
+    });
+    document.getElementById("copyBtn").addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(output.value).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    input.addEventListener("input", function () {
+      if (liveChk.checked) schedule();
+      else updateStats();
+    });
+    direction.addEventListener("change", convert);
+    sortChk.addEventListener("change", convert);
+    indentSel.addEventListener("change", convert);
+    document.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        convert();
+      }
+    });
+
+    setBadge("muted", "waiting for input", "");
+    updateStats();
+  </script>
+</body>
+</html>

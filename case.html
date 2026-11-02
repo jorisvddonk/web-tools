@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>case converter</title>
+  <meta name="description" content="Convert text between camelCase, PascalCase, snake_case, kebab-case, CONSTANT_CASE, slug and more.">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>case converter</h1>
+    <p class="subtitle">Convert identifiers and phrases between common naming conventions. Runs locally.</p>
+
+    <label for="input">Input</label>
+    <textarea id="input" class="tall" placeholder="HTTP server response code" spellcheck="false"></textarea>
+
+    <div class="row">
+      <button id="convertBtn" type="button">Convert</button>
+      <button id="exampleBtn" type="button" class="secondary">Load example</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+      <span class="spacer"></span>
+      <button id="copyAllBtn" type="button" class="secondary">Copy all</button>
+    </div>
+
+    <div class="opts">
+      <label><input type="checkbox" id="liveChk" checked> Convert live</label>
+      <span class="hint" id="wordHint"></span>
+    </div>
+
+    <div class="error" id="error" role="alert"></div>
+
+    <section class="card">
+      <h2>Conversions</h2>
+      <table>
+        <thead><tr><th style="width:9rem">Style</th><th>Value</th><th style="width:4.5rem"></th></tr></thead>
+        <tbody id="caseBody"></tbody>
+      </table>
+      <div class="hint" id="emptyHint">Type something to see conversions.</div>
+    </section>
+  </main>
+
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var input = document.getElementById("input");
+    var liveChk = document.getElementById("liveChk");
+    var wordHint = document.getElementById("wordHint");
+    var errorEl = document.getElementById("error");
+    var caseBody = document.getElementById("caseBody");
+    var emptyHint = document.getElementById("emptyHint");
+    var lastValues = [];
+
+    function splitWords(text) {
+      return text
+        .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+        .replace(/([A-Z]+)([A-Z][a-z])/g, "$1 $2")
+        .replace(/[^A-Za-z0-9]+/g, " ")
+        .trim()
+        .split(/\s+/)
+        .filter(Boolean)
+        .map(function (word) { return word.toLowerCase(); });
+    }
+
+    function capitalize(word) {
+      return word.charAt(0).toUpperCase() + word.slice(1);
+    }
+
+    function stripDiacritics(text) {
+      return text.normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+    }
+
+    function conversions(text) {
+      var words = splitWords(text);
+      var joined = words.join("");
+      return {
+        "camelCase": words.length ? words[0] + words.slice(1).map(capitalize).join("") : "",
+        "PascalCase": words.map(capitalize).join(""),
+        "snake_case": words.join("_"),
+        "kebab-case": words.join("-"),
+        "CONSTANT_CASE": words.join("_").toUpperCase(),
+        "dot.case": words.join("."),
+        "Title Case": words.map(capitalize).join(" "),
+        "Sentence case": words.length ? capitalize(words.join(" ")) : "",
+        "slug": stripDiacritics(words.join("-")).toLowerCase(),
+        "lowercase": text.toLowerCase(),
+        "UPPERCASE": text.toUpperCase(),
+        "words": words.length
+      };
+    }
+
+    function copyTextValue(value, button) {
+      Toolkit.copyText(value).then(function () { Toolkit.flash(button, "Copied!"); });
+    }
+
+    function render() {
+      caseBody.innerHTML = "";
+      var text = input.value;
+      if (!text.trim()) {
+        wordHint.textContent = "";
+        emptyHint.classList.remove("hidden");
+        lastValues = [];
+        return;
+      }
+      emptyHint.classList.add("hidden");
+      var result = conversions(text);
+      var words = result.words;
+      delete result.words;
+      wordHint.textContent = words + " word" + (words === 1 ? "" : "s");
+      lastValues = [];
+
+      Object.keys(result).forEach(function (name) {
+        var value = result[name];
+        lastValues.push(name + ": " + value);
+        var tr = document.createElement("tr");
+        var nameTd = document.createElement("td");
+        nameTd.textContent = name;
+        nameTd.style.whiteSpace = "nowrap";
+        var valueTd = document.createElement("td");
+        valueTd.className = "mono";
+        valueTd.style.wordBreak = "break-all";
+        valueTd.textContent = value;
+        var actionTd = document.createElement("td");
+        var btn = document.createElement("button");
+        btn.type = "button";
+        btn.className = "secondary tiny";
+        btn.textContent = "Copy";
+        btn.addEventListener("click", function () { copyTextValue(value, btn); });
+        actionTd.appendChild(btn);
+        tr.appendChild(nameTd);
+        tr.appendChild(valueTd);
+        tr.appendChild(actionTd);
+        caseBody.appendChild(tr);
+      });
+    }
+
+    var schedule = Toolkit.debounce(render, 120);
+
+    document.getElementById("convertBtn").addEventListener("click", render);
+    document.getElementById("exampleBtn").addEventListener("click", function () {
+      input.value = "HTTPServer response_code v2";
+      render();
+    });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      input.value = "";
+      render();
+      input.focus();
+    });
+    document.getElementById("copyAllBtn").addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(lastValues.join("\n")).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    input.addEventListener("input", function () {
+      if (liveChk.checked) schedule();
+    });
+
+    render();
+  </script>
+</body>
+</html>

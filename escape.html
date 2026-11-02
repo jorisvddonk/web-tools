@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>escape / unescape</title>
+  <meta name="description" content="Escape and unescape HTML entities, JSON strings, Python strings, shell arguments and URL components.">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>escape / unescape</h1>
+    <p class="subtitle">Move text in and out of HTML, JSON, Python, shell and URL escaping. Runs locally.</p>
+
+    <div class="row" style="margin-top:0">
+      <label for="formatSel" style="margin:0">Format</label>
+      <select id="formatSel" aria-label="Escape format">
+        <option value="html" selected>HTML entities</option>
+        <option value="json">JSON string</option>
+        <option value="python">Python string</option>
+        <option value="shell">Shell single-quoted</option>
+        <option value="url">URL component</option>
+      </select>
+
+      <label for="directionSel" style="margin:0 0 0 0.75rem">Direction</label>
+      <select id="directionSel" aria-label="Direction">
+        <option value="escape" selected>Escape</option>
+        <option value="unescape">Unescape</option>
+      </select>
+      <span class="spacer"></span>
+      <button id="exampleBtn" type="button" class="secondary">Load example</button>
+    </div>
+
+    <div class="opts">
+      <label><input type="checkbox" id="liveChk" checked> Convert live</label>
+      <span class="hint" id="formatHint"></span>
+    </div>
+
+    <label for="input">Input</label>
+    <textarea id="input" class="tall" spellcheck="false"></textarea>
+
+    <div class="row">
+      <span id="statusBadge" class="badge muted">waiting for input</span>
+      <span id="statusHint" class="hint"></span>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+
+    <label for="output">Output</label>
+    <textarea id="output" class="tall" readonly spellcheck="false"></textarea>
+
+    <div class="row">
+      <button id="convertBtn" type="button">Convert</button>
+      <button id="swapBtn" type="button" class="secondary">Swap</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+      <span class="spacer"></span>
+      <button id="copyBtn" type="button" class="secondary">Copy output</button>
+    </div>
+    <div class="stats" id="stats"></div>
+  </main>
+
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var input = document.getElementById("input");
+    var output = document.getElementById("output");
+    var formatSel = document.getElementById("formatSel");
+    var directionSel = document.getElementById("directionSel");
+    var liveChk = document.getElementById("liveChk");
+    var formatHint = document.getElementById("formatHint");
+    var statusBadge = document.getElementById("statusBadge");
+    var statusHint = document.getElementById("statusHint");
+    var errorEl = document.getElementById("error");
+    var statsEl = document.getElementById("stats");
+    var timer = null;
+
+    var HINTS = {
+      html: "Escapes & < > \" ' as HTML entities.",
+      json: "Output includes surrounding quotes.",
+      python: "Output is a single-quoted Python string literal.",
+      shell: "Output is a single-quoted shell argument.",
+      url: "Encodes everything except URL-unreserved characters."
+    };
+
+    function htmlEscape(text) {
+      return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function htmlUnescape(text) {
+      var area = document.createElement("textarea");
+      area.innerHTML = text;
+      return area.value;
+    }
+
+    function jsonUnescape(text) {
+      var value = text.trim();
+      if (!(value.charAt(0) === '"' && value.charAt(value.length - 1) === '"')) {
+        value = '"' + value.replace(/(^|[^\\])"/g, '$1\\"') + '"';
+      }
+      return JSON.parse(value);
+    }
+
+    function pythonEscape(text) {
+      return "'" + text
+        .replace(/\\/g, "\\\\")
+        .replace(/'/g, "\\'")
+        .replace(/\n/g, "\\n")
+        .replace(/\r/g, "\\r")
+        .replace(/\t/g, "\\t") + "'";
+    }
+
+    function backslashUnescape(text) {
+      var value = text.trim();
+      if (value.length >= 2 && (value.charAt(0) === "'" || value.charAt(0) === '"') &&
+          value.charAt(value.length - 1) === value.charAt(0)) {
+        value = value.slice(1, -1);
+      }
+      var out = "";
+      for (var i = 0; i < value.length; i++) {
+        var c = value[i];
+        if (c !== "\\") { out += c; continue; }
+        var next = value[i + 1];
+        i++;
+        if (next === undefined) { out += "\\"; break; }
+        if (next === "n") out += "\n";
+        else if (next === "r") out += "\r";
+        else if (next === "t") out += "\t";
+        else if (next === "b") out += "\b";
+        else if (next === "f") out += "\f";
+        else if (next === "v") out += "\v";
+        else if (next === "0") out += "\0";
+        else if (next === "\\") out += "\\";
+        else if (next === "'") out += "'";
+        else if (next === '"') out += '"';
+        else if (next === "x") {
+          var hex = value.slice(i + 1, i + 3);
+          if (!/^[0-9a-fA-F]{2}$/.test(hex)) throw new Error("Invalid \\x escape.");
+          out += String.fromCharCode(parseInt(hex, 16));
+          i += 2;
+        } else if (next === "u") {
+          var code = value.slice(i + 1, i + 5);
+          if (!/^[0-9a-fA-F]{4}$/.test(code)) throw new Error("Invalid \\u escape.");
+          out += String.fromCharCode(parseInt(code, 16));
+          i += 4;
+        } else {
+          out += next;
+        }
+      }
+      return out;
+    }
+
+    function shellEscape(text) {
+      return "'" + text.replace(/'/g, "'\\''") + "'";
+    }
+
+    function shellUnescape(text) {
+      var value = text.trim();
+      if (value.length >= 2 && value.charAt(0) === "'" && value.charAt(value.length - 1) === "'") {
+        value = value.slice(1, -1);
+      }
+      return value.replace(/'\\''/g, "'");
+    }
+
+    function convert() {
+      errorEl.textContent = "";
+      var text = input.value;
+      if (!text) {
+        output.value = "";
+        statusBadge.className = "badge muted";
+        statusBadge.textContent = "waiting for input";
+        statusHint.textContent = "";
+        updateStats();
+        return;
+      }
+
+      var format = formatSel.value;
+      var escape = directionSel.value === "escape";
+
+      try {
+        if (format === "html") output.value = escape ? htmlEscape(text) : htmlUnescape(text);
+        else if (format === "json") output.value = escape ? JSON.stringify(text) : jsonUnescape(text);
+        else if (format === "python") output.value = escape ? pythonEscape(text) : backslashUnescape(text);
+        else if (format === "shell") output.value = escape ? shellEscape(text) : shellUnescape(text);
+        else if (format === "url") output.value = escape ? encodeURIComponent(text) : decodeURIComponent(text);
+
+        statusBadge.className = "badge ok";
+        statusBadge.textContent = escape ? "escaped" : "unescaped";
+        statusHint.textContent = format.toUpperCase() + " · " + (escape ? "escape" : "unescape");
+        updateStats();
+      } catch (e) {
+        output.value = "";
+        statusBadge.className = "badge bad";
+        statusBadge.textContent = "conversion failed";
+        statusHint.textContent = "";
+        errorEl.textContent = e && e.message ? e.message : String(e);
+        updateStats();
+      }
+    }
+
+    function updateStats() {
+      var inBytes = new TextEncoder().encode(input.value).length;
+      var outBytes = new TextEncoder().encode(output.value).length;
+      statsEl.textContent = "input: " + input.value.length + " chars / " + inBytes + " bytes · output: " +
+        output.value.length + " chars / " + outBytes + " bytes";
+    }
+
+    function updateHint() {
+      formatHint.textContent = HINTS[formatSel.value] || "";
+    }
+
+    function schedule() {
+      clearTimeout(timer);
+      timer = setTimeout(convert, 140);
+    }
+
+    document.getElementById("convertBtn").addEventListener("click", convert);
+    document.getElementById("exampleBtn").addEventListener("click", function () {
+      input.value = 'Hello <world> & "friends"\nLine 2: café';
+      directionSel.value = "escape";
+      convert();
+    });
+    document.getElementById("swapBtn").addEventListener("click", function () {
+      if (!output.value) return;
+      input.value = output.value;
+      output.value = "";
+      directionSel.value = directionSel.value === "escape" ? "unescape" : "escape";
+      convert();
+      input.focus();
+    });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      input.value = "";
+      output.value = "";
+      errorEl.textContent = "";
+      statusBadge.className = "badge muted";
+      statusBadge.textContent = "waiting for input";
+      statusHint.textContent = "";
+      updateStats();
+      input.focus();
+    });
+    document.getElementById("copyBtn").addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(output.value).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    input.addEventListener("input", function () { if (liveChk.checked) schedule(); else updateStats(); });
+    formatSel.addEventListener("change", function () { updateHint(); convert(); });
+    directionSel.addEventListener("change", convert);
+    document.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        convert();
+      }
+    });
+
+    updateHint();
+    updateStats();
+  </script>
+</body>
+</html>

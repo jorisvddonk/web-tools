@@ -1,0 +1,458 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>csv ↔ json converter</title>
+  <meta name="description" content="Convert CSV to JSON and JSON to CSV with header, delimiter and table preview options. Runs in your browser.">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="wide">
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>csv &harr; json converter</h1>
+    <p class="subtitle">Convert between CSV and JSON, with a table preview. Handles quoted fields and embedded newlines.</p>
+
+    <div class="row" style="margin-top:0">
+      <label for="formatSel" style="margin:0">Input format</label>
+      <select id="formatSel" aria-label="Input format">
+        <option value="csv" selected>CSV</option>
+        <option value="json">JSON</option>
+      </select>
+
+      <label for="delimiterSel" style="margin:0 0 0 0.75rem">Delimiter</label>
+      <select id="delimiterSel" aria-label="Delimiter">
+        <option value="auto" selected>Auto</option>
+        <option value=",">Comma</option>
+        <option value="tab">Tab</option>
+        <option value=";">Semicolon</option>
+        <option value="|">Pipe</option>
+      </select>
+
+      <label id="headerLabel"><input type="checkbox" id="headerChk" checked> First row is header</label>
+      <span class="spacer"></span>
+      <button id="exampleBtn" type="button" class="secondary">Load example</button>
+    </div>
+
+    <div class="opts">
+      <label><input type="checkbox" id="liveChk" checked> Convert live</label>
+      <label><input type="checkbox" id="skipEmptyChk" checked> Skip empty CSV rows</label>
+    </div>
+
+    <div class="grid" style="margin-top:0.75rem">
+      <div>
+        <label for="input">Input</label>
+        <textarea id="input" class="tall" spellcheck="false"></textarea>
+      </div>
+      <div>
+        <label for="output">Output</label>
+        <textarea id="output" class="tall" readonly spellcheck="false"></textarea>
+      </div>
+    </div>
+
+    <div class="row">
+      <button id="convertBtn" type="button">Convert</button>
+      <button id="swapBtn" type="button" class="secondary">Swap</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+      <span class="spacer"></span>
+      <button id="copyBtn" type="button" class="secondary">Copy output</button>
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="statusBadge" class="badge muted">waiting for input</span>
+      <span id="statusHint" class="hint"></span>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+
+    <section class="card">
+      <h2>Table preview</h2>
+      <div style="overflow-x:auto">
+        <table id="previewTable"></table>
+      </div>
+      <div class="hint" id="previewEmpty">No preview yet.</div>
+      <div class="hint" id="previewNote"></div>
+    </section>
+  </main>
+
+  <script src="./json-locator.js"></script>
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var input = document.getElementById("input");
+    var output = document.getElementById("output");
+    var formatSel = document.getElementById("formatSel");
+    var delimiterSel = document.getElementById("delimiterSel");
+    var headerChk = document.getElementById("headerChk");
+    var headerLabel = document.getElementById("headerLabel");
+    var liveChk = document.getElementById("liveChk");
+    var skipEmptyChk = document.getElementById("skipEmptyChk");
+    var statusBadge = document.getElementById("statusBadge");
+    var statusHint = document.getElementById("statusHint");
+    var errorEl = document.getElementById("error");
+    var previewTable = document.getElementById("previewTable");
+    var previewEmpty = document.getElementById("previewEmpty");
+    var previewNote = document.getElementById("previewNote");
+
+    var EXAMPLE_CSV = 'name,role,notes\n' +
+      'Ada,engineer,"Loves math, code"\n' +
+      'Grace,admiral,"COBOL, literally"\n' +
+      'Katherine,computer,"Orbital mechanics"';
+
+    function delimiterChar() {
+      return delimiterSel.value === "tab" ? "\t" : delimiterSel.value;
+    }
+
+    function detectDelimiter(text) {
+      var line = text.split(/\r?\n/).find(function (row) { return row.trim() !== ""; }) || "";
+      var counts = { ",": 0, "\t": 0, ";": 0, "|": 0 };
+      var inQuotes = false;
+      for (var i = 0; i < line.length; i++) {
+        var c = line[i];
+        if (c === '"') {
+          if (inQuotes && line[i + 1] === '"') i++;
+          else inQuotes = !inQuotes;
+        } else if (!inQuotes && counts[c] !== undefined) {
+          counts[c]++;
+        }
+      }
+      var best = ",";
+      Object.keys(counts).forEach(function (key) {
+        if (counts[key] > counts[best]) best = key;
+      });
+      return best;
+    }
+
+    function parseCsv(text, delimiter) {
+      var rows = [];
+      var row = [];
+      var field = "";
+      var inQuotes = false;
+      var source = text.replace(/^\uFEFF/, "");
+
+      for (var i = 0; i < source.length; i++) {
+        var c = source[i];
+        if (inQuotes) {
+          if (c === '"') {
+            if (source[i + 1] === '"') { field += '"'; i++; }
+            else inQuotes = false;
+          } else {
+            field += c;
+          }
+        } else if (c === '"') {
+          inQuotes = true;
+        } else if (c === delimiter) {
+          row.push(field);
+          field = "";
+        } else if (c === "\n" || c === "\r") {
+          if (c === "\r" && source[i + 1] === "\n") i++;
+          row.push(field);
+          rows.push(row);
+          row = [];
+          field = "";
+        } else {
+          field += c;
+        }
+      }
+      if (inQuotes) throw new Error("Unclosed quoted CSV field.");
+      if (row.length || field !== "") {
+        row.push(field);
+        rows.push(row);
+      }
+      return rows;
+    }
+
+    function csvEscape(value, delimiter) {
+      var text = value === null || value === undefined ? "" : String(value);
+      if (text === "" || text.indexOf(delimiter) !== -1 || text.indexOf('"') !== -1 ||
+          /[\r\n]/.test(text) || /^\s|\s$/.test(text)) {
+        return '"' + text.replace(/"/g, '""') + '"';
+      }
+      return text;
+    }
+
+    function uniqueHeaders(headers) {
+      var seen = Object.create(null);
+      return headers.map(function (header, index) {
+        var name = String(header || "").trim() || "column" + (index + 1);
+        if (seen[name]) {
+          var count = seen[name] + 1;
+          while (seen[name + "_" + count]) count++;
+          seen[name] = count;
+          name = name + "_" + count;
+        }
+        seen[name] = seen[name] || 1;
+        return name;
+      });
+    }
+
+    function renderPreview(headers, rows, showHeader) {
+      previewTable.innerHTML = "";
+      previewNote.textContent = "";
+      previewEmpty.classList.remove("hidden");
+      if (!headers.length) {
+        previewEmpty.textContent = "No rows to preview.";
+        return;
+      }
+      previewEmpty.classList.add("hidden");
+
+      if (showHeader) {
+        var thead = document.createElement("thead");
+        var tr = document.createElement("tr");
+        headers.slice(0, 30).forEach(function (header) {
+          var th = document.createElement("th");
+          th.textContent = header;
+          tr.appendChild(th);
+        });
+        thead.appendChild(tr);
+        previewTable.appendChild(thead);
+      }
+
+      var tbody = document.createElement("tbody");
+      rows.slice(0, 50).forEach(function (row) {
+        var tr = document.createElement("tr");
+        headers.slice(0, 30).forEach(function (_, index) {
+          var td = document.createElement("td");
+          td.className = "mono";
+          td.textContent = row[index] === undefined ? "" : row[index];
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      previewTable.appendChild(tbody);
+
+      if (rows.length > 50 || headers.length > 30) {
+        previewNote.textContent = "Preview limited to 50 rows and 30 columns.";
+      }
+    }
+
+    function jsonParseError(text, e) {
+      var message = e && e.message ? e.message : String(e);
+      if (window.JSONLocator) {
+        var located = JSONLocator.find(text);
+        if (located) {
+          var loc = JSONLocator.position(text, located.index);
+          return located.message + " (line " + loc.line + ", column " + loc.column + ")";
+        }
+      }
+      return message;
+    }
+
+    function convert() {
+      errorEl.textContent = "";
+      if (!input.value.trim()) {
+        output.value = "";
+        previewTable.innerHTML = "";
+        previewNote.textContent = "";
+        previewEmpty.classList.remove("hidden");
+        previewEmpty.textContent = "No preview yet.";
+        statusBadge.className = "badge muted";
+        statusBadge.textContent = "waiting for input";
+        statusHint.textContent = "";
+        return;
+      }
+
+      try {
+        if (formatSel.value === "csv") {
+          convertCsvToJson();
+        } else {
+          convertJsonToCsv();
+        }
+      } catch (e) {
+        output.value = "";
+        previewTable.innerHTML = "";
+        previewEmpty.classList.remove("hidden");
+        previewEmpty.textContent = "No preview.";
+        statusBadge.className = "badge bad";
+        statusBadge.textContent = "conversion failed";
+        statusHint.textContent = "";
+        errorEl.textContent = e && e.message ? e.message : String(e);
+      }
+    }
+
+    function convertCsvToJson() {
+      var delimiter = delimiterSel.value === "auto" ? detectDelimiter(input.value) : delimiterChar();
+      var rows = parseCsv(input.value, delimiter);
+      if (skipEmptyChk.checked) {
+        rows = rows.filter(function (row) { return !(row.length === 1 && row[0] === ""); });
+      }
+      if (!rows.length) {
+        output.value = "[]";
+        renderPreview([], [], false);
+        statusBadge.className = "badge ok";
+        statusBadge.textContent = "converted";
+        statusHint.textContent = "0 rows";
+        return;
+      }
+
+      var width = rows.reduce(function (max, row) { return Math.max(max, row.length); }, 0);
+      var headers;
+      var dataRows;
+      if (headerChk.checked) {
+        headers = uniqueHeaders(rows[0].concat(new Array(Math.max(0, width - rows[0].length)).fill("")));
+        dataRows = rows.slice(1);
+      } else {
+        headers = [];
+        for (var i = 0; i < width; i++) headers.push("column" + (i + 1));
+        dataRows = rows;
+      }
+
+      var objects = dataRows.map(function (row) {
+        var object = Object.create(null);
+        headers.forEach(function (header, index) {
+          object[header] = row[index] === undefined ? "" : row[index];
+        });
+        return object;
+      });
+
+      output.value = JSON.stringify(objects, null, 2);
+      renderPreview(headers, dataRows.map(function (row) {
+        var copy = row.slice();
+        while (copy.length < headers.length) copy.push("");
+        return copy;
+      }), true);
+      statusBadge.className = "badge ok";
+      statusBadge.textContent = "converted";
+      statusHint.textContent = dataRows.length + " row(s) · " + headers.length + " column(s)";
+    }
+
+    function convertJsonToCsv() {
+      var data;
+      try {
+        data = JSON.parse(input.value);
+      } catch (e) {
+        throw new Error("Input is not valid JSON: " + jsonParseError(input.value, e));
+      }
+
+      var headers = [];
+      var rows = [];
+      var showHeader = headerChk.checked;
+
+      if (Array.isArray(data)) {
+        if (!data.length) {
+          output.value = "";
+          renderPreview([], [], false);
+          statusBadge.className = "badge ok";
+          statusBadge.textContent = "converted";
+          statusHint.textContent = "0 rows";
+          return;
+        }
+
+        var allObjects = data.every(function (row) { return row && typeof row === "object" && !Array.isArray(row); });
+        var allArrays = data.every(function (row) { return Array.isArray(row); });
+
+        if (allObjects) {
+          data.forEach(function (row) {
+            Object.keys(row).forEach(function (key) {
+              if (headers.indexOf(key) === -1) headers.push(key);
+            });
+          });
+          rows = data.map(function (row) {
+            return headers.map(function (key) {
+              var value = row[key];
+              if (value === null || value === undefined) return "";
+              if (typeof value === "object") return JSON.stringify(value);
+              return value;
+            });
+          });
+        } else if (allArrays) {
+          var width = data.reduce(function (max, row) { return Math.max(max, row.length); }, 0);
+          for (var i = 0; i < width; i++) headers.push("column" + (i + 1));
+          rows = data.map(function (row) {
+            var copy = row.slice();
+            while (copy.length < width) copy.push("");
+            return copy;
+          });
+        } else {
+          headers = ["value"];
+          rows = data.map(function (value) {
+            return [value === null || value === undefined ? "" : typeof value === "object" ? JSON.stringify(value) : value];
+          });
+        }
+      } else if (data && typeof data === "object") {
+        headers = Object.keys(data);
+        rows = [headers.map(function (key) {
+          var value = data[key];
+          if (value === null || value === undefined) return "";
+          return typeof value === "object" ? JSON.stringify(value) : value;
+        })];
+      } else {
+        headers = ["value"];
+        rows = [[data]];
+        showHeader = false;
+      }
+
+      var delimiter = delimiterSel.value === "auto" ? "," : delimiterChar();
+      var lines = [];
+      if (showHeader) lines.push(headers.map(function (header) { return csvEscape(header, delimiter); }).join(delimiter));
+      rows.forEach(function (row) {
+        lines.push(headers.map(function (_, index) { return csvEscape(row[index], delimiter); }).join(delimiter));
+      });
+
+      output.value = lines.join("\n");
+      renderPreview(headers, rows, headers.length > 0);
+      statusBadge.className = "badge ok";
+      statusBadge.textContent = "converted";
+      statusHint.textContent = rows.length + " row(s) · " + headers.length + " column(s)";
+    }
+
+    function updateHeaderLabel() {
+      headerLabel.lastChild.nodeValue = formatSel.value === "csv" ? " First row is header" : " Include header row";
+    }
+
+    var schedule = Toolkit.debounce(convert, 250);
+
+    document.getElementById("convertBtn").addEventListener("click", convert);
+    document.getElementById("exampleBtn").addEventListener("click", function () {
+      formatSel.value = "csv";
+      updateHeaderLabel();
+      headerChk.checked = true;
+      delimiterSel.value = "auto";
+      input.value = EXAMPLE_CSV;
+      convert();
+    });
+    document.getElementById("swapBtn").addEventListener("click", function () {
+      if (!output.value) return;
+      input.value = output.value;
+      formatSel.value = formatSel.value === "csv" ? "json" : "csv";
+      output.value = "";
+      updateHeaderLabel();
+      convert();
+    });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      input.value = "";
+      output.value = "";
+      errorEl.textContent = "";
+      previewTable.innerHTML = "";
+      previewNote.textContent = "";
+      previewEmpty.classList.remove("hidden");
+      previewEmpty.textContent = "No preview yet.";
+      statusBadge.className = "badge muted";
+      statusBadge.textContent = "waiting for input";
+      statusHint.textContent = "";
+      input.focus();
+    });
+    document.getElementById("copyBtn").addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(output.value).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    input.addEventListener("input", function () { if (liveChk.checked) schedule(); });
+    formatSel.addEventListener("change", function () {
+      updateHeaderLabel();
+      convert();
+    });
+    delimiterSel.addEventListener("change", convert);
+    headerChk.addEventListener("change", convert);
+    skipEmptyChk.addEventListener("change", convert);
+    document.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        convert();
+      }
+    });
+
+    updateHeaderLabel();
+    statusBadge.className = "badge muted";
+    statusBadge.textContent = "waiting for input";
+  </script>
+</body>
+</html>

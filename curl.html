@@ -1,0 +1,595 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>curl converter</title>
+  <meta name="description" content="Convert curl commands to fetch, axios, Python requests or Go net/http code. Runs entirely in your browser.">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>curl converter</h1>
+    <p class="subtitle">Turn a curl command into fetch, axios, Python or Go code. Nothing leaves your browser.</p>
+
+    <label for="input">curl command</label>
+    <textarea id="input" class="tall" spellcheck="false"></textarea>
+
+    <div class="row" style="margin-top:0">
+      <label for="langSel" style="margin:0">Output</label>
+      <select id="langSel" aria-label="Output language">
+        <option value="fetch" selected>JavaScript fetch</option>
+        <option value="axios">axios</option>
+        <option value="python">Python requests</option>
+        <option value="go">Go net/http</option>
+      </select>
+      <span class="spacer"></span>
+      <button id="exampleBtn" type="button" class="secondary">Load example</button>
+    </div>
+
+    <div class="opts">
+      <label><input type="checkbox" id="liveChk" checked> Convert live</label>
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="statusBadge" class="badge muted">waiting for input</span>
+      <span id="statusHint" class="hint"></span>
+    </div>
+    <div class="hint" id="warnings" style="color:var(--warn)"></div>
+    <div class="error" id="error" role="alert"></div>
+
+    <label for="output">Generated code</label>
+    <textarea id="output" class="tall" readonly spellcheck="false"></textarea>
+    <div class="row">
+      <button id="convertBtn" type="button">Convert</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+      <span class="spacer"></span>
+      <button id="copyBtn" type="button" class="secondary">Copy code</button>
+    </div>
+    <div class="stats" id="stats"></div>
+
+    <footer>
+      Supported: method, URL, headers, data/JSON, basic auth, cookies, user-agent, referer,
+      query data (<span class="mono">-G</span>) and basic multipart forms. File uploads are emitted as placeholders.
+    </footer>
+  </main>
+
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var input = document.getElementById("input");
+    var output = document.getElementById("output");
+    var langSel = document.getElementById("langSel");
+    var liveChk = document.getElementById("liveChk");
+    var statusBadge = document.getElementById("statusBadge");
+    var statusHint = document.getElementById("statusHint");
+    var warningsEl = document.getElementById("warnings");
+    var errorEl = document.getElementById("error");
+    var statsEl = document.getElementById("stats");
+
+    var EXAMPLE = "curl -X POST 'https://api.example.com/v1/users' \\\n" +
+      "  -H 'Content-Type: application/json' \\\n" +
+      "  -H 'Authorization: Bearer token123' \\\n" +
+      "  -d '{\"name\":\"Ada\",\"admin\":true}'";
+
+    var ARG_FLAGS = { X: 1, H: 1, d: 1, u: 1, b: 1, A: 1, e: 1, F: 1, o: 1, m: 1, x: 1, T: 1, w: 1, c: 1, K: 1 };
+    var NOARG_FLAGS = { s: 1, S: 1, L: 1, k: 1, I: 1, i: 1, v: 1, f: 1, g: 1, j: 1, n: 1, O: 1 };
+
+    function tokenize(command) {
+      var source = command.replace(/\\\r?\n/g, " ");
+      var tokens = [];
+      var current = "";
+      var started = false;
+      var quote = null;
+
+      for (var i = 0; i < source.length; i++) {
+        var c = source[i];
+        if (quote === "'") {
+          if (c === "'") quote = null;
+          else current += c;
+          continue;
+        }
+        if (quote === '"') {
+          if (c === '"') { quote = null; continue; }
+          if (c === "\\") {
+            var next = source[i + 1];
+            if (next === '"' || next === "\\" || next === "$" || next === "`") { current += next; i++; }
+            else if (next === "\n") { i++; }
+            else current += c;
+            continue;
+          }
+          current += c;
+          continue;
+        }
+        if (c === "'" || c === '"') { quote = c; started = true; continue; }
+        if (/\s/.test(c)) {
+          if (started) { tokens.push(current); current = ""; started = false; }
+          continue;
+        }
+        if (c === "\\") {
+          var escaped = source[i + 1];
+          if (escaped !== undefined) { if (escaped !== "\n") current += escaped; i++; }
+          started = true;
+          continue;
+        }
+        if (c === "$" && source[i + 1] === "'") { i++; quote = "'"; started = true; continue; }
+        current += c;
+        started = true;
+      }
+      if (started) tokens.push(current);
+      return tokens;
+    }
+
+    function parseCurl(command) {
+      var tokens = tokenize(command);
+      if (tokens.length && /(^|\/)curl(\.exe)?$/i.test(tokens[0])) tokens.shift();
+      if (!tokens.length) throw new Error("Paste a curl command first.");
+
+      var req = {
+        method: null,
+        url: null,
+        headers: [],
+        data: [],
+        forms: [],
+        user: null,
+        cookie: null,
+        userAgent: null,
+        referer: null,
+        head: false,
+        follow: false,
+        insecure: false,
+        get: false,
+        jsonMode: false,
+        warnings: []
+      };
+
+      var i = 0;
+
+      function takeValue(option, inline) {
+        if (inline !== null && inline !== undefined) return inline;
+        if (i + 1 >= tokens.length) throw new Error("Option " + option + " needs a value.");
+        return tokens[++i];
+      }
+
+      function addHeader(value) {
+        var colon = value.indexOf(":");
+        if (colon === -1) {
+          req.warnings.push('Ignored header without a colon: "' + value + '"');
+          return;
+        }
+        var name = value.slice(0, colon).trim();
+        var val = value.slice(colon + 1).trim();
+        if (!name) return;
+        if (!val) return;
+        req.headers.push({ name: name, value: val });
+      }
+
+      for (; i < tokens.length; i++) {
+        var token = tokens[i];
+        var name = token;
+        var inline = null;
+
+        if (token.indexOf("--") === 0) {
+          var eq = token.indexOf("=");
+          if (eq !== -1) {
+            name = token.slice(0, eq);
+            inline = token.slice(eq + 1);
+          }
+        } else if (/^-[A-Za-z].+/.test(token)) {
+          var short = token.charAt(1);
+          if (ARG_FLAGS[short]) {
+            name = "-" + short;
+            inline = token.slice(2);
+          }
+        }
+
+        if (name === "-X" || name === "--request") {
+          req.method = takeValue(name, inline).toUpperCase();
+        } else if (name === "-H" || name === "--header") {
+          addHeader(takeValue(name, inline));
+        } else if (name === "-d" || name === "--data" || name === "--data-raw" || name === "--data-ascii" || name === "--data-binary") {
+          var data = takeValue(name, inline);
+          if (name === "--data-binary" && data.charAt(0) === "@") {
+            req.warnings.push("File body " + data + " is kept as a literal; read it yourself in the generated code.");
+          }
+          req.data.push(data);
+        } else if (name === "--data-urlencode") {
+          var encoded = takeValue(name, inline);
+          var partEq = encoded.indexOf("=");
+          if (partEq === -1) req.data.push(encodeURIComponent(encoded));
+          else req.data.push(encoded.slice(0, partEq) + "=" + encodeURIComponent(encoded.slice(partEq + 1)));
+        } else if (name === "--json") {
+          req.jsonMode = true;
+          req.data.push(takeValue(name, inline));
+        } else if (name === "-F" || name === "--form") {
+          req.forms.push(takeValue(name, inline));
+        } else if (name === "-u" || name === "--user") {
+          req.user = takeValue(name, inline);
+        } else if (name === "-b" || name === "--cookie") {
+          req.cookie = takeValue(name, inline);
+        } else if (name === "-A" || name === "--user-agent") {
+          req.userAgent = takeValue(name, inline);
+        } else if (name === "-e" || name === "--referer") {
+          req.referer = takeValue(name, inline);
+        } else if (name === "--url") {
+          req.url = takeValue(name, inline);
+        } else if (name === "-I" || name === "--head") {
+          req.head = true;
+        } else if (name === "-L" || name === "--location") {
+          req.follow = true;
+        } else if (name === "-k" || name === "--insecure") {
+          req.insecure = true;
+          req.warnings.push("Insecure TLS (-k) cannot be expressed in browser fetch; Python gets verify=False.");
+        } else if (name === "-G" || name === "--get") {
+          req.get = true;
+        } else if (name === "--compressed") {
+          /* clients decompress automatically */
+        } else if (name === "--cert" || name === "--key" || name === "--cacert" || name === "--proxy" || name === "-x") {
+          takeValue(name, inline);
+          req.warnings.push("Client certificates and proxies are not represented in the generated code.");
+        } else if (name === "-o" || name === "--output" || name === "-m" || name === "--max-time" ||
+                   name === "--connect-timeout" || name === "-w" || name === "--write-out" ||
+                   name === "-c" || name === "--cookie-jar" || name === "--retry" || name === "-T" ||
+                   name === "-K" || name === "--config") {
+          takeValue(name, inline);
+          if (name === "-T") req.warnings.push("Uploads (-T) are not represented.");
+        } else if (name === "--http1.1" || name === "--http2" || name === "--http3" || name === "--no-progress-meter") {
+          /* ignore */
+        } else if (token.charAt(0) === "-" && token.charAt(1) !== "-" && token.length > 2 && !inline) {
+          var flagsOk = true;
+          for (var f = 1; f < token.length; f++) {
+            if (NOARG_FLAGS[token.charAt(f)]) {
+              if (token.charAt(f) === "I") req.head = true;
+              if (token.charAt(f) === "L") req.follow = true;
+              if (token.charAt(f) === "k") req.insecure = true;
+            } else {
+              flagsOk = false;
+              break;
+            }
+          }
+          if (!flagsOk) req.warnings.push('Ignored unknown option "' + token + '".');
+        } else if (token.charAt(0) === "-") {
+          req.warnings.push('Ignored unknown option "' + token + '".');
+        } else if (!req.url) {
+          req.url = token;
+        } else {
+          req.warnings.push('Ignored extra URL "' + token + '".');
+        }
+      }
+
+      if (!req.url) throw new Error("No URL found in that curl command.");
+      if (!/^[a-zA-Z][a-zA-Z0-9+.-]*:/.test(req.url)) req.url = "https://" + req.url;
+      return req;
+    }
+
+    function base64Utf8(text) {
+      var bytes = new TextEncoder().encode(text);
+      var binary = "";
+      for (var i = 0; i < bytes.length; i++) binary += String.fromCharCode(bytes[i]);
+      return btoa(binary);
+    }
+
+    function headerExists(headers, name) {
+      return headers.some(function (header) { return header.name.toLowerCase() === name.toLowerCase(); });
+    }
+
+    function buildRequest(req) {
+      var headers = req.headers.slice();
+      var warnings = req.warnings.slice();
+
+      if (req.forms.length) {
+        if (req.data.length) warnings.push("Both -d and -F were present; the multipart form wins.");
+      } else if (req.data.length) {
+        var isJson = req.jsonMode || headers.some(function (header) {
+          return header.name.toLowerCase() === "content-type" && /json/i.test(header.value);
+        });
+        if (req.jsonMode && !headerExists(headers, "Content-Type")) {
+          headers.push({ name: "Content-Type", value: "application/json" });
+        } else if (!req.jsonMode && !headerExists(headers, "Content-Type")) {
+          headers.push({ name: "Content-Type", value: "application/x-www-form-urlencoded" });
+        }
+        if (req.jsonMode && !headerExists(headers, "Accept")) {
+          headers.push({ name: "Accept", value: "application/json" });
+        }
+      }
+
+      if (req.user && !headerExists(headers, "Authorization")) {
+        var userPass = req.user.indexOf(":") === -1 ? req.user + ":" : req.user;
+        headers.push({ name: "Authorization", value: "Basic " + base64Utf8(userPass) });
+      }
+      if (req.cookie && !headerExists(headers, "Cookie")) {
+        if (req.cookie.indexOf("=") !== -1) headers.push({ name: "Cookie", value: req.cookie });
+        else warnings.push("Cookie file " + req.cookie + " is not read; pass the cookie value instead.");
+      }
+      if (req.userAgent && !headerExists(headers, "User-Agent")) headers.push({ name: "User-Agent", value: req.userAgent });
+      if (req.referer && !headerExists(headers, "Referer")) headers.push({ name: "Referer", value: req.referer });
+
+      var method = req.method || (req.head ? "HEAD" : req.get ? "GET" : (req.data.length || req.forms.length) ? "POST" : "GET");
+      var url = req.url;
+      var body = null;
+
+      if (req.get && req.data.length) {
+        var params = new URLSearchParams();
+        req.data.forEach(function (item) {
+          item.split("&").forEach(function (pair) {
+            var eq = pair.indexOf("=");
+            if (eq === -1) params.append(pair, "");
+            else params.append(pair.slice(0, eq), pair.slice(eq + 1));
+          });
+        });
+        var query = params.toString();
+        if (query) url += (url.indexOf("?") === -1 ? "?" : "&") + query;
+        body = null;
+      } else if (req.forms.length) {
+        body = { type: "multipart", fields: parseForms(req.forms) };
+      } else if (req.data.length) {
+        body = { type: "text", text: req.data.join("&") };
+      }
+
+      return { method: method, url: url, headers: headers, body: body, warnings: warnings };
+    }
+
+    function parseForms(entries) {
+      return entries.map(function (entry) {
+        var semi = entry.indexOf(";");
+        var main = semi === -1 ? entry : entry.slice(0, semi);
+        var meta = semi === -1 ? "" : entry.slice(semi + 1);
+        var eq = main.indexOf("=");
+        if (eq === -1) return { name: main, value: "", file: false, meta: meta };
+        var value = main.slice(eq + 1);
+        var isFile = value.charAt(0) === "@" || value.charAt(0) === "<";
+        var filenameMatch = /(?:^|;)\s*filename=([^;]+)/.exec(meta);
+        return {
+          name: main.slice(0, eq),
+          value: isFile ? value.slice(1) : value,
+          file: isFile,
+          filename: filenameMatch ? filenameMatch[1].replace(/^"|"$/g, "") : null,
+          meta: meta
+        };
+      });
+    }
+
+    function jsString(value) { return JSON.stringify(String(value)); }
+    function pyString(value) { return JSON.stringify(String(value)); }
+    function goString(value) { return JSON.stringify(String(value)); }
+
+    function indent(lines, pad) {
+      return lines.map(function (line) { return pad + line; }).join("\n");
+    }
+
+    function generateFetch(req) {
+      var lines = [];
+      if (req.body && req.body.type === "multipart") {
+        lines.push("// TODO: provide the File objects used below.");
+        lines.push("const form = new FormData();");
+        req.body.fields.forEach(function (field) {
+          if (field.file) {
+            lines.push("form.append(" + jsString(field.name) + ", file, " + jsString(field.filename || field.value) + "); // TODO");
+          } else {
+            lines.push("form.append(" + jsString(field.name) + ", " + jsString(field.value) + ");");
+          }
+        });
+        lines.push("");
+      }
+      lines.push("const response = await fetch(" + jsString(req.url) + ", {");
+      lines.push("  method: " + jsString(req.method) + ",");
+      if (req.headers.length) {
+        lines.push("  headers: {");
+        req.headers.forEach(function (header) {
+          lines.push("    " + jsString(header.name) + ": " + jsString(header.value) + ",");
+        });
+        lines.push("  },");
+      }
+      if (req.body) lines.push("  body: " + (req.body.type === "multipart" ? "form" : jsString(req.body.text)) + ",");
+      lines.push("});");
+      lines.push("");
+      lines.push("const text = await response.text();");
+      lines.push("console.log(response.status, text);");
+      return lines.join("\n");
+    }
+
+    function generateAxios(req) {
+      var lines = ["import axios from \"axios\";", ""];
+      if (req.body && req.body.type === "multipart") {
+        lines.push("// TODO: provide the File objects used below.");
+        lines.push("const form = new FormData();");
+        req.body.fields.forEach(function (field) {
+          if (field.file) lines.push("form.append(" + jsString(field.name) + ", file, " + jsString(field.filename || field.value) + "); // TODO");
+          else lines.push("form.append(" + jsString(field.name) + ", " + jsString(field.value) + ");");
+        });
+        lines.push("");
+      }
+      lines.push("const response = await axios.request({");
+      lines.push("  url: " + jsString(req.url) + ",");
+      lines.push("  method: " + jsString(req.method.toLowerCase()) + ",");
+      if (req.headers.length) {
+        lines.push("  headers: {");
+        req.headers.forEach(function (header) {
+          lines.push("    " + jsString(header.name) + ": " + jsString(header.value) + ",");
+        });
+        lines.push("  },");
+      }
+      if (req.body) lines.push("  data: " + (req.body.type === "multipart" ? "form" : jsString(req.body.text)) + ",");
+      lines.push("});");
+      lines.push("");
+      lines.push("console.log(response.status, response.data);");
+      return lines.join("\n");
+    }
+
+    function generatePython(req) {
+      var lines = ["import requests", "", "response = requests.request("];
+      lines.push("    " + pyString(req.method) + ",");
+      lines.push("    " + pyString(req.url) + ",");
+      if (req.headers.length) {
+        lines.push("    headers={");
+        req.headers.forEach(function (header) {
+          lines.push("        " + pyString(header.name) + ": " + pyString(header.value) + ",");
+        });
+        lines.push("    },");
+      }
+      if (req.body && req.body.type === "multipart") {
+        var files = req.body.fields.filter(function (field) { return field.file; });
+        var values = req.body.fields.filter(function (field) { return !field.file; });
+        if (values.length) {
+          lines.push("    data={");
+          values.forEach(function (field) {
+            lines.push("        " + pyString(field.name) + ": " + pyString(field.value) + ",");
+          });
+          lines.push("    },");
+        }
+        if (files.length) {
+          lines.push("    files={");
+          files.forEach(function (field) {
+            lines.push("        " + pyString(field.name) + ": open(" + pyString(field.value) + ", \"rb\"),");
+          });
+          lines.push("    },");
+        }
+      } else if (req.body) {
+        lines.push("    data=" + pyString(req.body.text) + ",");
+      }
+      if (req.insecure) lines.push("    verify=False,");
+      lines.push(")");
+      lines.push("");
+      lines.push("print(response.status_code, response.text)");
+      return lines.join("\n");
+    }
+
+    function generateGo(req) {
+      var imports = ["fmt", "io", "net/http"];
+      var bodyLines = [];
+      var prelude = [];
+
+      if (req.body && req.body.type === "multipart") {
+        imports.push("bytes");
+        imports.push("mime/multipart");
+        prelude.push("var body bytes.Buffer");
+        prelude.push("writer := multipart.NewWriter(&body)");
+        req.body.fields.forEach(function (field, index) {
+          if (field.file) {
+            prelude.push("// TODO: create a form file for " + goString(field.value));
+            prelude.push("part" + index + ", _ := writer.CreateFormFile(" + goString(field.name) + ", " + goString(field.filename || field.value) + ")");
+            prelude.push("_ = part" + index + " // TODO: copy the file into part" + index);
+          } else {
+            prelude.push("writer.WriteField(" + goString(field.name) + ", " + goString(field.value) + ")");
+          }
+        });
+        prelude.push("writer.Close()");
+        bodyLines.push("http.NewRequest(" + goString(req.method) + ", " + goString(req.url) + ", &body)");
+      } else if (req.body) {
+        imports.push("strings");
+        bodyLines.push("http.NewRequest(" + goString(req.method) + ", " + goString(req.url) + ", strings.NewReader(" + goString(req.body.text) + "))");
+      } else {
+        bodyLines.push("http.NewRequest(" + goString(req.method) + ", " + goString(req.url) + ", nil)");
+      }
+
+      imports.sort();
+      var lines = ["package main", "", "import ("];
+      imports.forEach(function (name) { lines.push("\t" + goString(name)); });
+      lines.push(")", "", "func main() {");
+      prelude.forEach(function (line) { lines.push("\t" + line); });
+      if (prelude.length) lines.push("");
+      lines.push("\treq, err := " + bodyLines[0]);
+      lines.push("\tif err != nil {");
+      lines.push("\t\tpanic(err)");
+      lines.push("\t}");
+      req.headers.forEach(function (header) {
+        if (req.body && req.body.type === "multipart" && header.name.toLowerCase() === "content-type") return;
+        lines.push("\treq.Header.Set(" + goString(header.name) + ", " + goString(header.value) + ")");
+      });
+      if (req.body && req.body.type === "multipart") {
+        lines.push("\treq.Header.Set(\"Content-Type\", writer.FormDataContentType())");
+      }
+      lines.push("");
+      lines.push("\tresp, err := http.DefaultClient.Do(req)");
+      lines.push("\tif err != nil {");
+      lines.push("\t\tpanic(err)");
+      lines.push("\t}");
+      lines.push("\tdefer resp.Body.Close()");
+      lines.push("");
+      lines.push("\tdata, err := io.ReadAll(resp.Body)");
+      lines.push("\tif err != nil {");
+      lines.push("\t\tpanic(err)");
+      lines.push("\t}");
+      lines.push("\tfmt.Println(resp.Status, string(data))");
+      lines.push("}");
+      return lines.join("\n");
+    }
+
+    function convert() {
+      errorEl.textContent = "";
+      warningsEl.textContent = "";
+      if (!input.value.trim()) {
+        output.value = "";
+        statusBadge.className = "badge muted";
+        statusBadge.textContent = "waiting for input";
+        statusHint.textContent = "";
+        statsEl.textContent = "";
+        return;
+      }
+
+      var parsed;
+      try {
+        parsed = parseCurl(input.value);
+      } catch (e) {
+        output.value = "";
+        statusBadge.className = "badge bad";
+        statusBadge.textContent = "parse failed";
+        statusHint.textContent = "";
+        statsEl.textContent = "";
+        errorEl.textContent = e && e.message ? e.message : String(e);
+        return;
+      }
+
+      var req = buildRequest(parsed);
+      var code;
+      if (langSel.value === "fetch") code = generateFetch(req);
+      else if (langSel.value === "axios") code = generateAxios(req);
+      else if (langSel.value === "python") code = generatePython(req);
+      else code = generateGo(req);
+
+      output.value = code;
+      statusBadge.className = "badge ok";
+      statusBadge.textContent = "converted";
+      statusHint.textContent = req.method + " · " + req.headers.length + " header(s)" +
+        (req.body ? " · " + (req.body.type === "multipart" ? "multipart body" : req.body.text.length + " B body") : " · no body");
+      warningsEl.textContent = req.warnings.length ? req.warnings.join(" ") : "";
+      statsEl.textContent = code.split("\n").length + " lines";
+    }
+
+    var schedule = Toolkit.debounce(convert, 220);
+
+    document.getElementById("convertBtn").addEventListener("click", convert);
+    document.getElementById("exampleBtn").addEventListener("click", function () {
+      input.value = EXAMPLE;
+      convert();
+    });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      input.value = "";
+      output.value = "";
+      errorEl.textContent = "";
+      warningsEl.textContent = "";
+      statusBadge.className = "badge muted";
+      statusBadge.textContent = "waiting for input";
+      statusHint.textContent = "";
+      statsEl.textContent = "";
+      input.focus();
+    });
+    document.getElementById("copyBtn").addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(output.value).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    input.addEventListener("input", function () { if (liveChk.checked) schedule(); });
+    langSel.addEventListener("change", convert);
+    document.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        convert();
+      }
+    });
+
+    statusBadge.className = "badge muted";
+    statusBadge.textContent = "waiting for input";
+  </script>
+</body>
+</html>

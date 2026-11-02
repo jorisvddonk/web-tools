@@ -117,7 +117,7 @@ pre.out {
 pre.out:empty::before { content: "Nothing to show yet."; color: var(--muted); }
 
 table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
-th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); vertical-align: top; }
+th, td { text-align: left; padding: 0.4rem 0.5rem; border-bottom: 1px solid var(--border); vertical-align: top; overflow-wrap: anywhere; }
 th { color: var(--muted); font-weight: 600; font-size: 0.78rem; text-transform: uppercase; letter-spacing: 0.04em; }
 tr:last-child td { border-bottom: none; }
 td.mono, .mono { font-family: var(--mono); font-size: 0.85rem; }

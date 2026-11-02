@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>line tools</title>
+  <meta name="description" content="Sort, deduplicate, trim, reverse, shuffle, number and clean up lines of text. Runs in your browser.">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="wide">
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>line tools</h1>
+    <p class="subtitle">Clean up lists of lines: sort, dedupe, trim, reverse, shuffle and number. Runs locally.</p>
+
+    <div class="grid" style="margin-top:0">
+      <div>
+        <label for="input">Input</label>
+        <textarea id="input" class="tall" spellcheck="false" placeholder="One item per line…"></textarea>
+      </div>
+      <div>
+        <label for="output">Output</label>
+        <textarea id="output" class="tall" readonly spellcheck="false"></textarea>
+      </div>
+    </div>
+
+    <div class="opts">
+      <label><input type="checkbox" id="ignoreCaseChk"> Ignore case when sorting</label>
+      <span class="hint" id="operationHint"></span>
+      <span class="hint">Operations chain; edit the input to start over.</span>
+    </div>
+
+    <div class="row">
+      <button id="sortAscBtn" type="button" class="secondary">Sort A→Z</button>
+      <button id="sortDescBtn" type="button" class="secondary">Sort Z→A</button>
+      <button id="sortNaturalBtn" type="button" class="secondary">Natural sort</button>
+      <button id="sortLengthBtn" type="button" class="secondary">Sort by length</button>
+    </div>
+    <div class="row">
+      <button id="trimBtn" type="button" class="secondary">Trim lines</button>
+      <button id="blankBtn" type="button" class="secondary">Remove blank</button>
+      <button id="dedupeBtn" type="button" class="secondary">Dedupe</button>
+      <button id="dedupeCiBtn" type="button" class="secondary">Dedupe (ignore case)</button>
+    </div>
+    <div class="row">
+      <button id="reverseBtn" type="button" class="secondary">Reverse</button>
+      <button id="shuffleBtn" type="button" class="secondary">Shuffle</button>
+      <button id="numberBtn" type="button" class="secondary">Number lines</button>
+      <span class="spacer"></span>
+      <button id="useOutputBtn" type="button" class="secondary">Use output as input</button>
+    </div>
+
+    <div class="row">
+      <button id="exampleBtn" type="button" class="secondary">Load example</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+      <span class="spacer"></span>
+      <button id="copyBtn" type="button" class="secondary">Copy output</button>
+    </div>
+
+    <div class="stats" id="stats"></div>
+    <div class="error" id="error" role="alert"></div>
+  </main>
+
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var input = document.getElementById("input");
+    var output = document.getElementById("output");
+    var ignoreCaseChk = document.getElementById("ignoreCaseChk");
+    var operationHint = document.getElementById("operationHint");
+    var statsEl = document.getElementById("stats");
+
+    var EXAMPLES = "banana\napple\nBanana\n  cherry  \n\ndate\napple\nfig";
+
+    function linesOf(text) {
+      if (text === "") return [];
+      return text.replace(/\r\n?/g, "\n").split("\n");
+    }
+
+    function compareLines(a, b, natural) {
+      var left = ignoreCaseChk.checked ? a.toLowerCase() : a;
+      var right = ignoreCaseChk.checked ? b.toLowerCase() : b;
+      if (natural) return left.localeCompare(right, undefined, { numeric: true, sensitivity: ignoreCaseChk.checked ? "base" : "variant" });
+      return left.localeCompare(right, undefined, { sensitivity: ignoreCaseChk.checked ? "base" : "variant" });
+    }
+
+    function apply(label, transform) {
+      if (!input.value) {
+        operationHint.textContent = "Nothing to transform.";
+        return;
+      }
+      var source = output.value !== "" ? output.value : input.value;
+      var lines = linesOf(source);
+      var result = transform(lines);
+      output.value = result.join("\n");
+      operationHint.textContent = label + " · " + result.length + " line" + (result.length === 1 ? "" : "s");
+      updateStats();
+    }
+
+    function dedupe(lines, ignoreCase) {
+      var seen = Object.create(null);
+      return lines.filter(function (line) {
+        var key = ignoreCase ? line.toLowerCase() : line;
+        if (seen[key]) return false;
+        seen[key] = true;
+        return true;
+      });
+    }
+
+    function updateStats() {
+      var inputLines = linesOf(input.value);
+      var unique = Object.create(null);
+      var blanks = 0;
+      inputLines.forEach(function (line) {
+        if (!line.trim()) blanks++;
+        unique[line] = true;
+      });
+      statsEl.textContent = "input: " + inputLines.length + " lines · " + Object.keys(unique).length + " unique · " +
+        blanks + " blank · output: " + (output.value ? linesOf(output.value).length : 0) + " lines";
+    }
+
+    document.getElementById("sortAscBtn").addEventListener("click", function () {
+      apply("Sorted A→Z", function (lines) { return lines.slice().sort(function (a, b) { return compareLines(a, b, false); }); });
+    });
+    document.getElementById("sortDescBtn").addEventListener("click", function () {
+      apply("Sorted Z→A", function (lines) { return lines.slice().sort(function (a, b) { return compareLines(b, a, false); }); });
+    });
+    document.getElementById("sortNaturalBtn").addEventListener("click", function () {
+      apply("Natural sort", function (lines) { return lines.slice().sort(function (a, b) { return compareLines(a, b, true); }); });
+    });
+    document.getElementById("sortLengthBtn").addEventListener("click", function () {
+      apply("Sorted by length", function (lines) {
+        return lines.slice().sort(function (a, b) {
+          if (a.length !== b.length) return a.length - b.length;
+          return compareLines(a, b, false);
+        });
+      });
+    });
+    document.getElementById("trimBtn").addEventListener("click", function () {
+      apply("Trimmed lines", function (lines) { return lines.map(function (line) { return line.trim(); }); });
+    });
+    document.getElementById("blankBtn").addEventListener("click", function () {
+      apply("Removed blank lines", function (lines) { return lines.filter(function (line) { return line.trim() !== ""; }); });
+    });
+    document.getElementById("dedupeBtn").addEventListener("click", function () {
+      apply("Deduped", function (lines) { return dedupe(lines, false); });
+    });
+    document.getElementById("dedupeCiBtn").addEventListener("click", function () {
+      apply("Deduped (ignoring case)", function (lines) { return dedupe(lines, true); });
+    });
+    document.getElementById("reverseBtn").addEventListener("click", function () {
+      apply("Reversed", function (lines) { return lines.slice().reverse(); });
+    });
+    document.getElementById("shuffleBtn").addEventListener("click", function () {
+      apply("Shuffled", function (lines) {
+        var copy = lines.slice();
+        for (var i = copy.length - 1; i > 0; i--) {
+          var j = Math.floor(Math.random() * (i + 1));
+          var temp = copy[i];
+          copy[i] = copy[j];
+          copy[j] = temp;
+        }
+        return copy;
+      });
+    });
+    document.getElementById("numberBtn").addEventListener("click", function () {
+      apply("Numbered", function (lines) {
+        return lines.map(function (line, index) { return (index + 1) + ". " + line; });
+      });
+    });
+    document.getElementById("useOutputBtn").addEventListener("click", function () {
+      if (!output.value) return;
+      input.value = output.value;
+      output.value = "";
+      operationHint.textContent = "Output moved to input.";
+      updateStats();
+      input.focus();
+    });
+    document.getElementById("exampleBtn").addEventListener("click", function () {
+      input.value = EXAMPLES;
+      output.value = "";
+      operationHint.textContent = "";
+      updateStats();
+    });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      input.value = "";
+      output.value = "";
+      operationHint.textContent = "";
+      updateStats();
+      input.focus();
+    });
+    document.getElementById("copyBtn").addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(output.value).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    input.addEventListener("input", function () {
+      output.value = "";
+      operationHint.textContent = "";
+      updateStats();
+    });
+
+    updateStats();
+  </script>
+</body>
+</html>

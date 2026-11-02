@@ -1,0 +1,509 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>json to typescript / zod / go</title>
+  <meta name="description" content="Infer TypeScript interfaces, Zod schemas or Go structs from a JSON sample. Runs entirely in your browser.">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>json to types</h1>
+    <p class="subtitle">Paste a JSON sample and get TypeScript interfaces, a Zod schema or Go structs. Nothing leaves your browser.</p>
+
+    <label for="input">JSON sample</label>
+    <textarea id="input" class="tall" spellcheck="false"></textarea>
+
+    <div class="row" style="margin-top:0">
+      <label for="langSel" style="margin:0">Output</label>
+      <select id="langSel" aria-label="Output language">
+        <option value="ts" selected>TypeScript</option>
+        <option value="zod">Zod</option>
+        <option value="go">Go</option>
+      </select>
+      <label for="rootName" style="margin:0 0 0 1rem">Root name</label>
+      <input type="text" id="rootName" value="Root" spellcheck="false" autocomplete="off" style="width:9rem">
+      <span class="spacer"></span>
+      <button id="exampleBtn" type="button" class="secondary">Load example</button>
+    </div>
+
+    <div class="opts">
+      <label><input type="checkbox" id="liveChk" checked> Generate live</label>
+      <span class="hint">Fields missing from some array items become optional. JSON numbers map to <span class="mono">number</span>/<span class="mono">float64</span>.</span>
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="statusBadge" class="badge muted">waiting for input</span>
+      <span id="statusHint" class="hint"></span>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+
+    <label for="output">Generated code</label>
+    <textarea id="output" class="tall" readonly spellcheck="false"></textarea>
+    <div class="row">
+      <button id="generateBtn" type="button">Generate</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+      <span class="spacer"></span>
+      <button id="copyBtn" type="button" class="secondary">Copy code</button>
+    </div>
+    <div class="stats" id="stats"></div>
+  </main>
+
+  <script src="./json-locator.js"></script>
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var input = document.getElementById("input");
+    var output = document.getElementById("output");
+    var langSel = document.getElementById("langSel");
+    var rootInput = document.getElementById("rootName");
+    var liveChk = document.getElementById("liveChk");
+    var statusBadge = document.getElementById("statusBadge");
+    var statusHint = document.getElementById("statusHint");
+    var errorEl = document.getElementById("error");
+    var statsEl = document.getElementById("stats");
+
+    var EXAMPLE = {
+      id: 42,
+      name: "Ada Lovelace",
+      active: true,
+      email: null,
+      roles: ["admin", "engineer"],
+      nicknames: ["ada", null],
+      address: {
+        street: "1 Analytical Way",
+        city: "London",
+        zip: "N1"
+      },
+      projects: [
+        { name: "web-tools", stars: 42, tags: ["js"] },
+        { name: "crypto", stars: 7, archived: true }
+      ]
+    };
+
+    var timer = null;
+
+    function signature(type) {
+      if (type.kind === "array") return "array<" + signature(type.items) + ">";
+      if (type.kind === "object") {
+        return "object{" + Object.keys(type.props).sort().map(function (key) {
+          var prop = type.props[key];
+          return key + (prop.optional ? "?" : "") + ":" + signature(prop.type);
+        }).join(",") + "}";
+      }
+      if (type.kind === "union") {
+        return "union(" + type.types.map(signature).join("|") + ")";
+      }
+      return type.kind;
+    }
+
+    function infer(value) {
+      if (value === null) return { kind: "null" };
+      if (Array.isArray(value)) {
+        var items = { kind: "unknown" };
+        value.forEach(function (item) { items = mergeTypes(items, infer(item)); });
+        return { kind: "array", items: items };
+      }
+      if (typeof value === "object") {
+        var props = Object.create(null);
+        Object.keys(value).forEach(function (key) {
+          props[key] = { type: infer(value[key]), optional: false };
+        });
+        return { kind: "object", props: props };
+      }
+      return { kind: typeof value };
+    }
+
+    function mergeTypes(a, b) {
+      if (!a) return b;
+      if (!b) return a;
+      if (a.kind === "unknown") return b;
+      if (b.kind === "unknown") return a;
+
+      if (a.kind === "object" && b.kind === "object") {
+        var props = Object.create(null);
+        var keys = Object.keys(a.props);
+        Object.keys(b.props).forEach(function (key) {
+          if (keys.indexOf(key) === -1) keys.push(key);
+        });
+        keys.forEach(function (key) {
+          var pa = a.props[key];
+          var pb = b.props[key];
+          if (pa && pb) {
+            props[key] = { type: mergeTypes(pa.type, pb.type), optional: pa.optional || pb.optional };
+          } else if (pa) {
+            props[key] = { type: pa.type, optional: true };
+          } else {
+            props[key] = { type: pb.type, optional: true };
+          }
+        });
+        return { kind: "object", props: props };
+      }
+
+      if (a.kind === "array" && b.kind === "array") {
+        return { kind: "array", items: mergeTypes(a.items, b.items) };
+      }
+
+      if (a.kind === b.kind && a.kind !== "union") return a;
+
+      return unionOf([a, b]);
+    }
+
+    function unionOf(types) {
+      var flat = [];
+      types.forEach(function (type) {
+        if (type.kind === "union") flat = flat.concat(type.types);
+        else flat.push(type);
+      });
+
+      var seen = Object.create(null);
+      var unique = [];
+      flat.forEach(function (type) {
+        var key = signature(type);
+        if (!seen[key]) {
+          seen[key] = true;
+          unique.push(type);
+        }
+      });
+
+      if (unique.length === 1) return unique[0];
+      if (unique.some(function (type) { return type.kind === "unknown"; }) && unique.length > 1) {
+        unique = unique.filter(function (type) { return type.kind !== "unknown"; });
+        if (unique.length === 1) return unique[0];
+      }
+
+      unique.sort(function (a, b) {
+        if (a.kind === "null") return 1;
+        if (b.kind === "null") return -1;
+        return signature(a) < signature(b) ? -1 : signature(a) > signature(b) ? 1 : 0;
+      });
+      return { kind: "union", types: unique };
+    }
+
+    function pascal(value) {
+      var words = String(value == null ? "" : value).replace(/[^A-Za-z0-9]+/g, " ").trim().split(/\s+/);
+      var result = words.filter(Boolean).map(function (word) {
+        return word.charAt(0).toUpperCase() + word.slice(1);
+      }).join("");
+      if (!result) result = "Type";
+      if (/^[0-9]/.test(result)) result = "Type" + result;
+      return result;
+    }
+
+    function propKey(key) {
+      return /^[A-Za-z_$][A-Za-z0-9_$]*$/.test(key) ? key : JSON.stringify(key);
+    }
+
+    function createCollector(buildObject) {
+      var used = Object.create(null);
+      var bySignature = Object.create(null);
+      var declarations = [];
+
+      var api = { declarations: declarations };
+
+      api.unique = function (name) {
+        var base = pascal(name) || "Type";
+        var candidate = base;
+        var counter = 2;
+        while (used[candidate]) candidate = base + counter++;
+        used[candidate] = true;
+        return candidate;
+      };
+
+      api.reserve = function (name) {
+        used[name] = true;
+        return name;
+      };
+
+      api.objectName = function (type, suggested) {
+        var key = signature(type);
+        if (bySignature[key]) return bySignature[key];
+        var name = api.unique(suggested);
+        bySignature[key] = name;
+        var declaration = { name: name, body: "" };
+        declarations.push(declaration);
+        declaration.body = buildObject(type, name, api);
+        return name;
+      };
+
+      api.typeExpr = function (type, suggested) {
+        switch (type.kind) {
+          case "string": return "string";
+          case "number": return "number";
+          case "boolean": return "boolean";
+          case "null": return "null";
+          case "unknown": return "unknown";
+          case "object": return api.objectName(type, suggested);
+          case "array":
+            var inner = api.typeExpr(type.items, suggested + "Item");
+            return /[|&]/.test(inner) ? "(" + inner + ")[]" : inner + "[]";
+          case "union":
+            return type.types.map(function (variant) {
+              return api.typeExpr(variant, suggested + "Variant");
+            }).join(" | ");
+          default: return "unknown";
+        }
+      };
+
+      return api;
+    }
+
+    function typescriptOutput(rootType, rootName) {
+      var collector = createCollector(function (type, name, api) {
+        var lines = Object.keys(type.props).map(function (key) {
+          var prop = type.props[key];
+          var typeText = api.typeExpr(prop.type, name + " " + pascal(key));
+          return "  " + propKey(key) + (prop.optional ? "?" : "") + ": " + typeText + ";";
+        });
+        if (!lines.length) return "export interface " + name + " {}";
+        return "export interface " + name + " {\n" + lines.join("\n") + "\n}";
+      });
+
+      if (rootType.kind === "object") {
+        collector.typeExpr(rootType, rootName);
+        return { code: collector.declarations.map(function (decl) { return decl.body; }).join("\n\n"), count: collector.declarations.length };
+      }
+
+      collector.reserve(rootName);
+      var expr = collector.typeExpr(rootType, rootName);
+      var lines = ["export type " + rootName + " = " + expr + ";"];
+      collector.declarations.forEach(function (decl) { lines.push(decl.body); });
+      return { code: lines.join("\n\n"), count: collector.declarations.length };
+    }
+
+    function zodExpr(type, depth) {
+      var pad = new Array(depth + 1).join("  ");
+      switch (type.kind) {
+        case "string": return "z.string()";
+        case "number": return "z.number()";
+        case "boolean": return "z.boolean()";
+        case "null": return "z.null()";
+        case "unknown": return "z.unknown()";
+        case "array": return "z.array(" + zodExpr(type.items, depth) + ")";
+        case "union":
+          if (type.types.length === 2 && type.types.some(function (variant) { return variant.kind === "null"; })) {
+            var other = type.types.filter(function (variant) { return variant.kind !== "null"; })[0];
+            return zodExpr(other, depth) + ".nullable()";
+          }
+          return "z.union([\n" + type.types.map(function (variant) {
+            return new Array(depth + 2).join("  ") + zodExpr(variant, depth + 1);
+          }).join(",\n") + "\n" + pad + "])";
+        case "object":
+          var keys = Object.keys(type.props);
+          if (!keys.length) return "z.object({})";
+          var lines = keys.map(function (key) {
+            var prop = type.props[key];
+            return new Array(depth + 2).join("  ") + JSON.stringify(key) + ": " +
+              zodExpr(prop.type, depth + 1) + (prop.optional ? ".optional()" : "");
+          });
+          return "z.object({\n" + lines.join(",\n") + "\n" + pad + "})";
+        default: return "z.unknown()";
+      }
+    }
+
+    function zodOutput(rootType, rootName) {
+      var code = [
+        'import { z } from "zod";',
+        "",
+        "export const " + rootName + "Schema = " + zodExpr(rootType, 0) + ";",
+        "",
+        "export type " + rootName + " = z.infer<typeof " + rootName + "Schema>;"
+      ].join("\n");
+      return { code: code, count: 1 };
+    }
+
+    function goFieldName(key) {
+      var words = String(key).replace(/[^A-Za-z0-9]+/g, " ").trim().split(/\s+/);
+      var name = words.filter(Boolean).map(function (word) {
+        return word.charAt(0).toUpperCase() + word.slice(1);
+      }).join("");
+      if (!name) name = "Field";
+      if (/^[0-9]/.test(name)) name = "F" + name;
+      return name;
+    }
+
+    function goTypeExpr(type, suggested, api) {
+      switch (type.kind) {
+        case "string": return "string";
+        case "number": return "float64";
+        case "boolean": return "bool";
+        case "null": return "interface{}";
+        case "unknown": return "interface{}";
+        case "object": return api.objectName(type, suggested);
+        case "array": return "[]" + goTypeExpr(type.items, suggested + "Item", api);
+        case "union":
+          var nonNull = type.types.filter(function (variant) { return variant.kind !== "null"; });
+          if (nonNull.length === 1) {
+            var base = goTypeExpr(nonNull[0], suggested, api);
+            if (base === "interface{}" || base.charAt(0) === "*" || base.charAt(0) === "[" || base.indexOf("map[") === 0) return base;
+            return "*" + base;
+          }
+          return "interface{}";
+        default: return "interface{}";
+      }
+    }
+
+    function createGoCollector() {
+      var used = Object.create(null);
+      var bySignature = Object.create(null);
+      var declarations = [];
+      var api = { declarations: declarations };
+
+      api.unique = function (name) {
+        var base = pascal(name) || "Type";
+        var candidate = base;
+        var counter = 2;
+        while (used[candidate]) candidate = base + counter++;
+        used[candidate] = true;
+        return candidate;
+      };
+
+      api.reserve = function (name) {
+        used[name] = true;
+        return name;
+      };
+
+      api.objectName = function (type, suggested) {
+        var key = signature(type);
+        if (bySignature[key]) return bySignature[key];
+        var name = api.unique(suggested);
+        bySignature[key] = name;
+        var declaration = { name: name, body: "" };
+        declarations.push(declaration);
+        declaration.body = buildObject(type, name, api);
+        return name;
+      };
+
+      api.typeExpr = function (type, suggested) {
+        return goTypeExpr(type, suggested, api);
+      };
+
+      function buildObject(type, name, api) {
+        var usedFields = Object.create(null);
+        var lines = Object.keys(type.props).map(function (key) {
+          var prop = type.props[key];
+          var fieldName = goFieldName(key);
+          var baseName = fieldName;
+          var counter = 2;
+          while (usedFields[fieldName]) fieldName = baseName + counter++;
+          usedFields[fieldName] = true;
+
+          var typeText = api.typeExpr(prop.type, name + " " + pascal(key));
+          if (prop.optional && typeText !== "interface{}" && typeText.charAt(0) !== "*" &&
+              typeText.charAt(0) !== "[" && typeText.indexOf("map[") !== 0) {
+            typeText = "*" + typeText;
+          }
+
+          var tag = 'json:"' + String(key).replace(/"/g, '\\"') + (prop.optional ? ",omitempty" : "") + '"';
+          return "  " + fieldName + " " + typeText + " `" + tag + "`";
+        });
+        if (!lines.length) return "type " + name + " struct {\n}";
+        return "type " + name + " struct {\n" + lines.join("\n") + "\n}";
+      }
+
+      return api;
+    }
+
+    function goOutput(rootType, rootName) {
+      var collector = createGoCollector();
+
+      if (rootType.kind === "object") {
+        collector.typeExpr(rootType, rootName);
+        return { code: collector.declarations.map(function (decl) { return decl.body; }).join("\n\n"), count: collector.declarations.length };
+      }
+
+      collector.reserve(rootName);
+      var expr = collector.typeExpr(rootType, rootName);
+      var lines = ["type " + rootName + " " + expr];
+      collector.declarations.forEach(function (decl) { lines.push(decl.body); });
+      return { code: lines.join("\n\n"), count: collector.declarations.length };
+    }
+
+    function generate() {
+      errorEl.textContent = "";
+      if (!input.value.trim()) {
+        output.value = "";
+        statusBadge.className = "badge muted";
+        statusBadge.textContent = "waiting for input";
+        statusHint.textContent = "";
+        statsEl.textContent = "";
+        return;
+      }
+
+      var value;
+      try {
+        value = JSON.parse(input.value);
+      } catch (e) {
+        output.value = "";
+        statusBadge.className = "badge bad";
+        statusBadge.textContent = "invalid JSON";
+        statusHint.textContent = "";
+        statsEl.textContent = "";
+        var message = e && e.message ? e.message : String(e);
+        if (window.JSONLocator) {
+          var located = JSONLocator.find(input.value);
+          if (located) {
+            var loc = JSONLocator.position(input.value, located.index);
+            message = located.message + " (line " + loc.line + ", column " + loc.column + ")";
+          }
+        }
+        errorEl.textContent = message;
+        return;
+      }
+
+      var rootName = rootInput.value.trim() ? pascal(rootInput.value) : "Root";
+      var rootType = infer(value);
+      var result;
+      if (langSel.value === "ts") result = typescriptOutput(rootType, rootName);
+      else if (langSel.value === "zod") result = zodOutput(rootType, rootName);
+      else result = goOutput(rootType, rootName);
+
+      output.value = result.code;
+      statusBadge.className = "badge ok";
+      statusBadge.textContent = "generated";
+      statusHint.textContent = langSel.value === "ts" ? "TypeScript" : langSel.value === "zod" ? "Zod" : "Go";
+      statsEl.textContent = result.count + " type declaration(s) · " + result.code.split("\n").length + " lines";
+    }
+
+    var schedule = Toolkit.debounce(generate, 250);
+
+    document.getElementById("generateBtn").addEventListener("click", generate);
+    document.getElementById("exampleBtn").addEventListener("click", function () {
+      input.value = JSON.stringify(EXAMPLE, null, 2);
+      generate();
+    });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      input.value = "";
+      output.value = "";
+      errorEl.textContent = "";
+      statusBadge.className = "badge muted";
+      statusBadge.textContent = "waiting for input";
+      statusHint.textContent = "";
+      statsEl.textContent = "";
+      input.focus();
+    });
+    document.getElementById("copyBtn").addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(output.value).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    input.addEventListener("input", function () {
+      if (liveChk.checked) schedule();
+    });
+    langSel.addEventListener("change", generate);
+    rootInput.addEventListener("input", function () {
+      if (liveChk.checked) schedule();
+    });
+    document.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        generate();
+      }
+    });
+
+    statusBadge.className = "badge muted";
+    statusBadge.textContent = "waiting for input";
+  </script>
+</body>
+</html>

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>uuid / ulid / nanoid generator</title>
+  <meta name="description" content="Generate UUID v4, UUID v7, ULID and NanoID values locally with the Web Crypto API.">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>uuid / ulid generator</h1>
+    <p class="subtitle">Generate UUID v4, time-sortable UUID v7, ULID or NanoID values. Uses <span class="mono">crypto.getRandomValues</span>.</p>
+
+    <div class="row" style="margin-top:0">
+      <label for="typeSel" style="margin:0">Type</label>
+      <select id="typeSel" aria-label="Identifier type">
+        <option value="uuid4" selected>UUID v4 (random)</option>
+        <option value="uuid7">UUID v7 (time-sortable)</option>
+        <option value="ulid">ULID (time-sortable)</option>
+        <option value="nanoid">NanoID</option>
+      </select>
+
+      <label for="count" style="margin:0 0 0 0.75rem">Count</label>
+      <input type="number" id="count" value="5" min="1" max="100" step="1" style="width:5rem">
+
+      <button id="generateBtn" type="button">Generate</button>
+      <span class="spacer"></span>
+      <button id="copyBtn" type="button" class="secondary">Copy all</button>
+    </div>
+
+    <div class="opts">
+      <label><input type="checkbox" id="upperChk"> Uppercase</label>
+      <label id="hyphenOpt"><input type="checkbox" id="hyphenChk" checked> UUID hyphens</label>
+      <label id="lengthOpt" class="hidden">NanoID length
+        <input type="number" id="length" value="21" min="2" max="128" step="1" style="width:5rem;min-height:1.8rem;padding:0.1rem 0.4rem">
+      </label>
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="statusBadge" class="badge muted">waiting</span>
+      <span id="statusHint" class="hint"></span>
+    </div>
+    <div class="hint" id="timeHint"></div>
+    <div class="error" id="error" role="alert"></div>
+
+    <label for="output">Generated values</label>
+    <textarea id="output" class="tall" readonly spellcheck="false"></textarea>
+
+    <footer>
+      UUID v7 and ULID embed the current millisecond timestamp and sort lexicographically.
+      NanoID values use the URL-safe alphabet.
+    </footer>
+  </main>
+
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var typeSel = document.getElementById("typeSel");
+    var countInput = document.getElementById("count");
+    var upperChk = document.getElementById("upperChk");
+    var hyphenChk = document.getElementById("hyphenChk");
+    var hyphenOpt = document.getElementById("hyphenOpt");
+    var lengthInput = document.getElementById("length");
+    var lengthOpt = document.getElementById("lengthOpt");
+    var statusBadge = document.getElementById("statusBadge");
+    var statusHint = document.getElementById("statusHint");
+    var timeHint = document.getElementById("timeHint");
+    var errorEl = document.getElementById("error");
+    var output = document.getElementById("output");
+
+    var CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
+    var NANO_ALPHABET = "useandom-26T198340PX75pxJACKVERYMINDBUSHWOLFGQZbfghjklqvwyzrict";
+
+    function randomBytes(size) {
+      var bytes = new Uint8Array(size);
+      crypto.getRandomValues(bytes);
+      return bytes;
+    }
+
+    function hex(bytes) {
+      var result = "";
+      for (var i = 0; i < bytes.length; i++) result += bytes[i].toString(16).padStart(2, "0");
+      return result;
+    }
+
+    function uuidFromBytes(bytes) {
+      var text = hex(bytes);
+      return text.slice(0, 8) + "-" + text.slice(8, 12) + "-" + text.slice(12, 16) + "-" +
+        text.slice(16, 20) + "-" + text.slice(20);
+    }
+
+    function uuid4() {
+      var bytes = randomBytes(16);
+      bytes[6] = (bytes[6] & 0x0f) | 0x40;
+      bytes[8] = (bytes[8] & 0x3f) | 0x80;
+      return uuidFromBytes(bytes);
+    }
+
+    function uuid7() {
+      var bytes = randomBytes(16);
+      var timestamp = BigInt(Date.now());
+      for (var i = 0; i < 6; i++) {
+        bytes[i] = Number((timestamp >> BigInt(8 * (5 - i))) & 0xffn);
+      }
+      bytes[6] = (bytes[6] & 0x0f) | 0x70;
+      bytes[8] = (bytes[8] & 0x3f) | 0x80;
+      return uuidFromBytes(bytes);
+    }
+
+    function ulid() {
+      var timestamp = BigInt(Date.now());
+      var randomness = 0n;
+      var bytes = randomBytes(10);
+      for (var i = 0; i < bytes.length; i++) randomness = (randomness << 8n) | BigInt(bytes[i]);
+      var number = (timestamp << 80n) | randomness;
+      var result = "";
+      for (var j = 0; j < 26; j++) {
+        result = CROCKFORD[Number(number & 31n)] + result;
+        number >>= 5n;
+      }
+      return result;
+    }
+
+    function nanoid(size) {
+      var result = "";
+      while (result.length < size) {
+        var bytes = randomBytes(size * 2);
+        for (var i = 0; i < bytes.length && result.length < size; i++) {
+          if (bytes[i] < 256 - (256 % NANO_ALPHABET.length)) {
+            result += NANO_ALPHABET[bytes[i] % NANO_ALPHABET.length];
+          }
+        }
+      }
+      return result;
+    }
+
+    function updateOptions() {
+      var type = typeSel.value;
+      hyphenOpt.classList.toggle("hidden", type !== "uuid4" && type !== "uuid7");
+      lengthOpt.classList.toggle("hidden", type !== "nanoid");
+    }
+
+    function generate() {
+      errorEl.textContent = "";
+      timeHint.textContent = "";
+      if (!window.crypto || !crypto.getRandomValues) {
+        statusBadge.className = "badge bad";
+        statusBadge.textContent = "crypto unavailable";
+        errorEl.textContent = "This browser does not expose crypto.getRandomValues.";
+        output.value = "";
+        return;
+      }
+
+      var count = Math.max(1, Math.min(100, Number(countInput.value) || 1));
+      countInput.value = count;
+      var type = typeSel.value;
+      var length = Math.max(2, Math.min(128, Number(lengthInput.value) || 21));
+      lengthInput.value = length;
+      var values = [];
+
+      for (var i = 0; i < count; i++) {
+        var value;
+        if (type === "uuid4") value = uuid4();
+        else if (type === "uuid7") value = uuid7();
+        else if (type === "ulid") value = ulid();
+        else value = nanoid(length);
+
+        if ((type === "uuid4" || type === "uuid7") && !hyphenChk.checked) value = value.replace(/-/g, "");
+        if (upperChk.checked) value = value.toUpperCase();
+        values.push(value);
+      }
+
+      output.value = values.join("\n");
+      statusBadge.className = "badge ok";
+      statusBadge.textContent = count + " generated";
+      statusHint.textContent = type === "uuid4" ? "UUID v4" : type === "uuid7" ? "UUID v7" : type === "ulid" ? "ULID" : "NanoID";
+      if (type === "uuid7" || type === "ulid") {
+        timeHint.textContent = "Embedded timestamp: " + new Date().toISOString();
+      } else {
+        timeHint.textContent = "Random only; no embedded timestamp.";
+      }
+    }
+
+    function schedule() {
+      clearTimeout(schedule.timer);
+      schedule.timer = setTimeout(generate, 120);
+    }
+
+    document.getElementById("generateBtn").addEventListener("click", generate);
+    document.getElementById("copyBtn").addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(output.value).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    typeSel.addEventListener("change", function () { updateOptions(); generate(); });
+    countInput.addEventListener("input", schedule);
+    upperChk.addEventListener("change", generate);
+    hyphenChk.addEventListener("change", generate);
+    lengthInput.addEventListener("input", schedule);
+    document.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        generate();
+      }
+    });
+
+    updateOptions();
+    generate();
+  </script>
+</body>
+</html>

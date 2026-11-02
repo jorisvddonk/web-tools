@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>css clamp / gradient / shadow generator</title>
+  <meta name="description" content="Generate CSS clamp(), linear/radial gradients and box-shadow declarations with live previews.">
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .css-preview { border: 1px solid var(--border); border-radius: 10px; background: #fff; padding: 1.25rem; margin-top: 0.75rem; }
+    .gradient-preview { height: 8rem; border-radius: 8px; }
+    .shadow-box { width: 10rem; height: 7rem; border-radius: 10px; background: #fff; margin: 0.5rem auto; }
+    .stop-row { display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center; margin-top: 0.4rem; }
+    .stop-row input[type="color"] { width: 3rem; height: 2.2rem; padding: 0.1rem; }
+    .stop-row input[type="number"] { width: 6rem; }
+    pre.code { margin: 0.75rem 0 0; padding: 0.7rem 0.8rem; background: #fbfaf8; border: 1px solid var(--border); border-radius: 8px; font-family: var(--mono); font-size: 0.82rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+  </style>
+</head>
+<body>
+  <main>
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>css generators</h1>
+    <p class="subtitle">Generate <span class="mono">clamp()</span>, gradients and box shadows with live previews.</p>
+
+    <section class="card" style="margin-top:0">
+      <h2>Fluid size with clamp()</h2>
+      <div class="row" style="margin-top:0">
+        <label for="clampMin" style="margin:0">Min</label>
+        <input type="number" id="clampMin" value="1" step="0.1" min="0" style="width:6rem"> rem
+        <label for="clampPref" style="margin:0 0 0 0.5rem">Preferred</label>
+        <input type="number" id="clampPref" value="2.5" step="0.1" min="0" style="width:6rem"> vw
+        <label for="clampMax" style="margin:0 0 0 0.5rem">Max</label>
+        <input type="number" id="clampMax" value="2" step="0.1" min="0" style="width:6rem"> rem
+        <span class="spacer"></span>
+        <button id="copyClampBtn" type="button" class="secondary">Copy</button>
+      </div>
+      <pre class="code" id="clampOut"></pre>
+      <div class="css-preview">
+        <div id="clampPreview">The quick brown fox jumps over the lazy dog.</div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Gradient</h2>
+      <div class="row" style="margin-top:0">
+        <label for="gradientType" style="margin:0">Type</label>
+        <select id="gradientType">
+          <option value="linear" selected>Linear</option>
+          <option value="radial">Radial</option>
+        </select>
+        <label for="gradientAngle" style="margin:0 0 0 0.5rem">Angle</label>
+        <input type="number" id="gradientAngle" value="135" min="0" max="360" step="1" style="width:6rem"> deg
+        <span class="spacer"></span>
+        <button id="addStopBtn" type="button" class="secondary">Add stop</button>
+        <button id="copyGradientBtn" type="button" class="secondary">Copy</button>
+      </div>
+      <div id="stops" style="margin-top:0.5rem"></div>
+      <pre class="code" id="gradientOut"></pre>
+      <div class="css-preview">
+        <div class="gradient-preview" id="gradientPreview"></div>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>Box shadow</h2>
+      <div class="row" style="margin-top:0">
+        <label for="shadowX" style="margin:0">X</label>
+        <input type="number" id="shadowX" value="0" step="1" style="width:5rem"> px
+        <label for="shadowY" style="margin:0 0 0 0.5rem">Y</label>
+        <input type="number" id="shadowY" value="8" step="1" style="width:5rem"> px
+        <label for="shadowBlur" style="margin:0 0 0 0.5rem">Blur</label>
+        <input type="number" id="shadowBlur" value="24" min="0" step="1" style="width:5rem"> px
+        <label for="shadowSpread" style="margin:0 0 0 0.5rem">Spread</label>
+        <input type="number" id="shadowSpread" value="0" step="1" style="width:5rem"> px
+      </div>
+      <div class="row">
+        <label for="shadowColor" style="margin:0">Color</label>
+        <input type="color" id="shadowColor" value="#1d1c1a" style="width:3rem;height:2.2rem;padding:0.1rem">
+        <label for="shadowOpacity" style="margin:0 0 0 0.5rem">Opacity</label>
+        <input type="range" id="shadowOpacity" min="0" max="1" step="0.01" value="0.18" style="width:9rem">
+        <span class="hint" id="shadowOpacityValue">18%</span>
+        <label><input type="checkbox" id="shadowInset"> Inset</label>
+        <span class="spacer"></span>
+        <button id="copyShadowBtn" type="button" class="secondary">Copy</button>
+      </div>
+      <pre class="code" id="shadowOut"></pre>
+      <div class="css-preview">
+        <div class="shadow-box" id="shadowPreview"></div>
+      </div>
+    </section>
+  </main>
+
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var clampMin = document.getElementById("clampMin");
+    var clampPref = document.getElementById("clampPref");
+    var clampMax = document.getElementById("clampMax");
+    var clampOut = document.getElementById("clampOut");
+    var clampPreview = document.getElementById("clampPreview");
+
+    var gradientType = document.getElementById("gradientType");
+    var gradientAngle = document.getElementById("gradientAngle");
+    var stopsEl = document.getElementById("stops");
+    var gradientOut = document.getElementById("gradientOut");
+    var gradientPreview = document.getElementById("gradientPreview");
+
+    var shadowX = document.getElementById("shadowX");
+    var shadowY = document.getElementById("shadowY");
+    var shadowBlur = document.getElementById("shadowBlur");
+    var shadowSpread = document.getElementById("shadowSpread");
+    var shadowColor = document.getElementById("shadowColor");
+    var shadowOpacity = document.getElementById("shadowOpacity");
+    var shadowOpacityValue = document.getElementById("shadowOpacityValue");
+    var shadowInset = document.getElementById("shadowInset");
+    var shadowOut = document.getElementById("shadowOut");
+    var shadowPreview = document.getElementById("shadowPreview");
+
+    function value(input, fallback) {
+      var number = Number(input.value);
+      return isFinite(number) ? number : fallback;
+    }
+
+    function updateClamp() {
+      var min = value(clampMin, 1);
+      var pref = value(clampPref, 2.5);
+      var max = value(clampMax, 2);
+      var css = "font-size: clamp(" + min + "rem, " + pref + "vw, " + max + "rem);";
+      clampOut.textContent = css;
+      clampPreview.style.fontSize = "clamp(" + min + "rem, " + pref + "vw, " + max + "rem)";
+    }
+
+    function addStopRow(color, position) {
+      var row = document.createElement("div");
+      row.className = "stop-row";
+      var colorInput = document.createElement("input");
+      colorInput.type = "color";
+      colorInput.value = color;
+      var positionLabel = document.createElement("span");
+      positionLabel.className = "hint";
+      positionLabel.textContent = "at";
+      var positionInput = document.createElement("input");
+      positionInput.type = "number";
+      positionInput.min = "0";
+      positionInput.max = "100";
+      positionInput.value = position;
+      var percent = document.createElement("span");
+      percent.className = "hint";
+      percent.textContent = "%";
+      var remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "secondary tiny";
+      remove.textContent = "Remove";
+      remove.addEventListener("click", function () {
+        if (stopsEl.children.length <= 2) {
+          remove.disabled = true;
+          return;
+        }
+        row.remove();
+        updateGradient();
+      });
+      colorInput.addEventListener("input", updateGradient);
+      positionInput.addEventListener("input", updateGradient);
+      row.appendChild(colorInput);
+      row.appendChild(positionLabel);
+      row.appendChild(positionInput);
+      row.appendChild(percent);
+      row.appendChild(remove);
+      stopsEl.appendChild(row);
+      return row;
+    }
+
+    function gradientStops() {
+      return Array.from(stopsEl.querySelectorAll(".stop-row")).map(function (row) {
+        var color = row.querySelector('input[type="color"]').value;
+        var position = value(row.querySelector('input[type="number"]'), 0);
+        return color + " " + Math.max(0, Math.min(100, position)) + "%";
+      });
+    }
+
+    function updateGradient() {
+      var stops = gradientStops();
+      var css;
+      if (gradientType.value === "radial") {
+        css = "background-image: radial-gradient(circle, " + stops.join(", ") + ");";
+      } else {
+        css = "background-image: linear-gradient(" + value(gradientAngle, 135) + "deg, " + stops.join(", ") + ");";
+      }
+      gradientOut.textContent = css;
+      gradientPreview.style.backgroundImage = css.replace("background-image: ", "").replace(/;$/, "");
+    }
+
+    function rgbaFromHex(hex, opacity) {
+      var value = hex.replace("#", "");
+      if (value.length === 3) value = value.split("").map(function (c) { return c + c; }).join("");
+      var r = parseInt(value.slice(0, 2), 16);
+      var g = parseInt(value.slice(2, 4), 16);
+      var b = parseInt(value.slice(4, 6), 16);
+      return "rgba(" + r + ", " + g + ", " + b + ", " + Number(opacity).toFixed(2) + ")";
+    }
+
+    function updateShadow() {
+      var inset = shadowInset.checked ? "inset " : "";
+      var css = "box-shadow: " + inset + value(shadowX, 0) + "px " + value(shadowY, 8) + "px " +
+        Math.max(0, value(shadowBlur, 24)) + "px " + value(shadowSpread, 0) + "px " +
+        rgbaFromHex(shadowColor.value, shadowOpacity.value) + ";";
+      shadowOut.textContent = css;
+      shadowPreview.style.boxShadow = inset + value(shadowX, 0) + "px " + value(shadowY, 8) + "px " +
+        Math.max(0, value(shadowBlur, 24)) + "px " + value(shadowSpread, 0) + "px " +
+        rgbaFromHex(shadowColor.value, shadowOpacity.value);
+      shadowOpacityValue.textContent = Math.round(Number(shadowOpacity.value) * 100) + "%";
+    }
+
+    [clampMin, clampPref, clampMax].forEach(function (input) { input.addEventListener("input", updateClamp); });
+    [gradientType, gradientAngle].forEach(function (input) { input.addEventListener("input", updateGradient); });
+    [shadowX, shadowY, shadowBlur, shadowSpread, shadowColor, shadowOpacity, shadowInset].forEach(function (input) {
+      input.addEventListener("input", updateShadow);
+    });
+
+    document.getElementById("addStopBtn").addEventListener("click", function () {
+      addStopRow("#7c4dff", 50);
+      updateGradient();
+    });
+    document.getElementById("copyClampBtn").addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(clampOut.textContent).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    document.getElementById("copyGradientBtn").addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(gradientOut.textContent).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    document.getElementById("copyShadowBtn").addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(shadowOut.textContent).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+
+    addStopRow("#7c4dff", 0);
+    addStopRow("#ff7a59", 100);
+    updateClamp();
+    updateGradient();
+    updateShadow();
+  </script>
+</body>
+</html>

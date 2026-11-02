@@ -1,0 +1,240 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>jsonpath tester</title>
+  <meta name="description" content="Query JSON with JSONPath expressions and inspect matching values and paths. Runs in your browser.">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main>
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>jsonpath tester</h1>
+    <p class="subtitle">Query JSON with JSONPath. See matched values and the path that produced them.</p>
+
+    <label for="path">JSONPath expression</label>
+    <input type="text" id="path" value="$.store.book[?(@.price < 10)].title" spellcheck="false" autocomplete="off" class="mono">
+
+    <label for="input">JSON</label>
+    <textarea id="input" class="tall" spellcheck="false"></textarea>
+
+    <div class="row">
+      <button id="queryBtn" type="button">Query</button>
+      <button id="exampleBtn" type="button" class="secondary">Load example</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+      <span class="spacer"></span>
+      <button id="copyValuesBtn" type="button" class="secondary">Copy values</button>
+      <button id="copyPathsBtn" type="button" class="secondary">Copy paths</button>
+    </div>
+
+    <div class="opts">
+      <label><input type="checkbox" id="liveChk" checked> Query live</label>
+      <span class="hint">Examples: <span class="mono">$..price</span>, <span class="mono">$.items[*].id</span>, <span class="mono">$..book[?(@.price &lt; 10)]</span></span>
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="statusBadge" class="badge muted">waiting for input</span>
+      <span id="statusHint" class="hint"></span>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+
+    <section class="card">
+      <h2>Matches</h2>
+      <div style="overflow-x:auto">
+        <table>
+          <thead><tr><th style="width:2.5rem">#</th><th style="width:35%">Path</th><th>Value</th></tr></thead>
+          <tbody id="resultsBody"></tbody>
+        </table>
+      </div>
+      <div class="hint" id="emptyHint">Run a query to see matches.</div>
+    </section>
+
+    <footer>
+      Powered by JSONPath Plus. Path filters run locally against your data.
+    </footer>
+  </main>
+
+  <script src="./json-locator.js"></script>
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var pathInput = document.getElementById("path");
+    var input = document.getElementById("input");
+    var liveChk = document.getElementById("liveChk");
+    var statusBadge = document.getElementById("statusBadge");
+    var statusHint = document.getElementById("statusHint");
+    var errorEl = document.getElementById("error");
+    var resultsBody = document.getElementById("resultsBody");
+    var emptyHint = document.getElementById("emptyHint");
+    var matches = [];
+    var jsonpathPromise = null;
+    var seq = 0;
+
+    var EXAMPLE_DATA = {
+      store: {
+        book: [
+          { category: "reference", author: "Nigel Rees", title: "Sayings of the Century", price: 8.95 },
+          { category: "fiction", author: "Evelyn Waugh", title: "Sword of Honour", price: 12.99 },
+          { category: "fiction", author: "Herman Melville", title: "Moby Dick", isbn: "0-553-21311-3", price: 8.99 },
+          { category: "fiction", author: "J. R. R. Tolkien", title: "The Lord of the Rings", isbn: "0-395-19395-8", price: 22.99 }
+        ],
+        bicycle: { color: "red", price: 19.95 }
+      },
+      expensive: 10
+    };
+
+    function getJSONPath() {
+      if (!jsonpathPromise) {
+        jsonpathPromise = import("https://cdn.jsdelivr.net/npm/jsonpath-plus@10.3.0/dist/index-browser-esm.min.js").then(function (module) {
+          return module.JSONPath;
+        }).catch(function (e) {
+          jsonpathPromise = null;
+          throw new Error("Could not load JSONPath Plus: " + (e && e.message ? e.message : String(e)));
+        });
+      }
+      return jsonpathPromise;
+    }
+
+    function clearResults() {
+      matches = [];
+      resultsBody.innerHTML = "";
+      emptyHint.textContent = "Run a query to see matches.";
+      emptyHint.classList.remove("hidden");
+      statusHint.textContent = "";
+    }
+
+    function showError(message) {
+      clearResults();
+      statusBadge.className = "badge bad";
+      statusBadge.textContent = "query failed";
+      errorEl.textContent = message;
+    }
+
+    async function run() {
+      var mySeq = ++seq;
+      errorEl.textContent = "";
+      if (!input.value.trim()) {
+        clearResults();
+        statusBadge.className = "badge muted";
+        statusBadge.textContent = "waiting for input";
+        return;
+      }
+      if (!pathInput.value.trim()) {
+        showError("Enter a JSONPath expression.");
+        return;
+      }
+
+      var data;
+      try {
+        data = JSON.parse(input.value);
+      } catch (e) {
+        var message = e && e.message ? e.message : String(e);
+        if (window.JSONLocator) {
+          var located = JSONLocator.find(input.value);
+          if (located) {
+            var loc = JSONLocator.position(input.value, located.index);
+            message = located.message + " (line " + loc.line + ", column " + loc.column + ")";
+          }
+        }
+        showError("Input is not valid JSON: " + message);
+        return;
+      }
+
+      statusBadge.className = "badge muted";
+      statusBadge.textContent = "querying…";
+
+      try {
+        var JSONPath = await getJSONPath();
+        var found = JSONPath({ path: pathInput.value.trim(), json: data, resultType: "all" });
+        if (mySeq !== seq) return;
+        matches = Array.isArray(found) ? found : [];
+        render();
+      } catch (e) {
+        if (mySeq !== seq) return;
+        showError(e && e.message ? e.message : String(e));
+      }
+    }
+
+    function render() {
+      resultsBody.innerHTML = "";
+      emptyHint.classList.add("hidden");
+      statusBadge.className = "badge " + (matches.length ? "ok" : "muted");
+      statusBadge.textContent = matches.length ? matches.length + " match(es)" : "no matches";
+      statusHint.textContent = pathInput.value.trim();
+
+      var limit = 1000;
+      matches.slice(0, limit).forEach(function (match, index) {
+        var tr = document.createElement("tr");
+        var numTd = document.createElement("td");
+        numTd.textContent = index + 1;
+        numTd.className = "hint";
+        var pathTd = document.createElement("td");
+        pathTd.className = "mono";
+        pathTd.textContent = match.path;
+        var valueTd = document.createElement("td");
+        valueTd.className = "mono";
+        valueTd.style.wordBreak = "break-word";
+        valueTd.textContent = JSON.stringify(match.value);
+        tr.appendChild(numTd);
+        tr.appendChild(pathTd);
+        tr.appendChild(valueTd);
+        resultsBody.appendChild(tr);
+      });
+
+      if (matches.length > limit) {
+        var tr = document.createElement("tr");
+        var td = document.createElement("td");
+        td.colSpan = 3;
+        td.className = "hint";
+        td.textContent = "Showing the first " + limit + " of " + matches.length + " matches.";
+        tr.appendChild(td);
+        resultsBody.appendChild(tr);
+        emptyHint.classList.add("hidden");
+      } else if (!matches.length) {
+        emptyHint.classList.remove("hidden");
+        emptyHint.textContent = "No values matched that expression.";
+      }
+    }
+
+    var schedule = Toolkit.debounce(run, 280);
+
+    document.getElementById("queryBtn").addEventListener("click", run);
+    document.getElementById("exampleBtn").addEventListener("click", function () {
+      pathInput.value = "$.store.book[?(@.price < 10)].title";
+      input.value = JSON.stringify(EXAMPLE_DATA, null, 2);
+      run();
+    });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      input.value = "";
+      pathInput.value = "";
+      errorEl.textContent = "";
+      clearResults();
+      statusBadge.className = "badge muted";
+      statusBadge.textContent = "waiting for input";
+      input.focus();
+    });
+    document.getElementById("copyValuesBtn").addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(JSON.stringify(matches.map(function (match) { return match.value; }), null, 2))
+        .then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    document.getElementById("copyPathsBtn").addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(matches.map(function (match) { return match.path; }).join("\n"))
+        .then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    input.addEventListener("input", function () { if (liveChk.checked) schedule(); });
+    pathInput.addEventListener("input", function () { if (liveChk.checked) schedule(); });
+    document.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        run();
+      }
+    });
+
+    statusBadge.className = "badge muted";
+    statusBadge.textContent = "waiting for input";
+  </script>
+</body>
+</html>

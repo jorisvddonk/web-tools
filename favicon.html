@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>favicon generator</title>
+  <meta name="description" content="Generate favicon PNGs and a multi-size ICO from any image, entirely in your browser.">
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    #dropZone { border: 2px dashed var(--border); border-radius: 10px; padding: 1.25rem; text-align: center; cursor: pointer; background: #fff; }
+    #dropZone.dragging { border-color: var(--accent); background: #faf8ff; }
+    .icon-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(8.5rem, 1fr)); gap: 0.75rem; }
+    .icon-card { border: 1px solid var(--border); border-radius: 8px; padding: 0.6rem; background: #fff; text-align: center; }
+    .icon-card canvas { max-width: 100%; image-rendering: pixelated; background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0 / 12px 12px; border-radius: 4px; }
+    .icon-card .hint { margin: 0.35rem 0; }
+    .button-link { display: inline-block; border: 1px solid var(--accent); border-radius: 8px; background: var(--accent); color: #fff; font-size: 0.9rem; font-weight: 600; padding: 0.5rem 1rem; text-decoration: none; }
+    .button-link.disabled { opacity: 0.5; pointer-events: none; }
+  </style>
+</head>
+<body>
+  <main class="wide">
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>favicon generator</h1>
+    <p class="subtitle">Turn an image into favicon PNGs and a multi-size <span class="mono">favicon.ico</span>. Runs locally.</p>
+
+    <div id="dropZone" role="button" tabindex="0">
+      <strong>Drop an image here</strong> or click to choose a file
+      <div class="hint" style="margin-top:0.25rem">Source image should be square for best results.</div>
+      <input type="file" id="fileInput" accept="image/*" class="hidden">
+    </div>
+
+    <div class="row">
+      <label for="padding" style="margin:0">Padding %</label>
+      <input type="range" id="padding" min="0" max="20" step="1" value="6" style="width:8rem">
+      <span class="hint" id="paddingValue">6%</span>
+
+      <label for="fitSel" style="margin:0 0 0 0.75rem">Fit</label>
+      <select id="fitSel">
+        <option value="contain" selected>Contain</option>
+        <option value="cover">Cover</option>
+      </select>
+
+      <label><input type="checkbox" id="transparentChk" checked> Transparent background</label>
+      <input type="color" id="background" value="#ffffff" style="width:3rem;height:2.4rem;padding:0.1rem">
+      <span class="spacer"></span>
+      <button id="sampleBtn" type="button" class="secondary">Use sample</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="statusBadge" class="badge muted">waiting for image</span>
+      <span id="statusHint" class="hint"></span>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+
+    <section class="card">
+      <div class="row" style="margin-top:0">
+        <h2 style="margin:0">Icons</h2>
+        <span class="spacer"></span>
+        <a id="icoDownload" class="button-link disabled" href="#" download="favicon.ico">Download favicon.ico</a>
+      </div>
+      <div class="hint" id="icoInfo" style="margin-top:0.5rem">Generate icons to build a multi-size ICO.</div>
+      <div class="icon-grid" id="iconGrid" style="margin-top:0.75rem"></div>
+    </section>
+
+    <section class="card">
+      <div class="row" style="margin-top:0">
+        <h2 style="margin:0">HTML snippet</h2>
+        <span class="spacer"></span>
+        <button id="copySnippetBtn" type="button" class="secondary tiny">Copy</button>
+      </div>
+      <pre class="out" id="snippet" style="margin-top:0.5rem;max-height:14rem"></pre>
+    </section>
+  </main>
+
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var dropZone = document.getElementById("dropZone");
+    var fileInput = document.getElementById("fileInput");
+    var padding = document.getElementById("padding");
+    var paddingValue = document.getElementById("paddingValue");
+    var fitSel = document.getElementById("fitSel");
+    var transparentChk = document.getElementById("transparentChk");
+    var background = document.getElementById("background");
+    var statusBadge = document.getElementById("statusBadge");
+    var statusHint = document.getElementById("statusHint");
+    var errorEl = document.getElementById("error");
+    var iconGrid = document.getElementById("iconGrid");
+    var icoDownload = document.getElementById("icoDownload");
+    var icoInfo = document.getElementById("icoInfo");
+    var snippet = document.getElementById("snippet");
+    var copySnippetBtn = document.getElementById("copySnippetBtn");
+
+    var SIZES = [16, 32, 48, 64, 128, 180, 192, 512];
+    var source = null;
+    var iconBlobs = Object.create(null);
+    var previewUrls = [];
+    var icoUrl = null;
+    var generation = 0;
+
+    var SNIPPET = '<link rel="icon" href="/favicon.ico" sizes="any">\n' +
+      '<link rel="icon" type="image/png" sizes="32x32" href="/favicon-32x32.png">\n' +
+      '<link rel="icon" type="image/png" sizes="16x16" href="/favicon-16x16.png">\n' +
+      '<link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.png">';
+
+    function setStatus(kind, label, hint) {
+      statusBadge.className = "badge " + kind;
+      statusBadge.textContent = label;
+      statusHint.textContent = hint || "";
+    }
+
+    function revokePreviews() {
+      previewUrls.forEach(function (url) { URL.revokeObjectURL(url); });
+      previewUrls = [];
+      if (icoUrl) URL.revokeObjectURL(icoUrl);
+      icoUrl = null;
+      icoDownload.href = "#";
+      icoDownload.classList.add("disabled");
+    }
+
+    function loadAsImage(file) {
+      return new Promise(function (resolve, reject) {
+        var image = new Image();
+        var url = URL.createObjectURL(file);
+        image.onload = function () { URL.revokeObjectURL(url); resolve(image); };
+        image.onerror = function () { URL.revokeObjectURL(url); reject(new Error("Could not decode that image.")); };
+        image.src = url;
+      });
+    }
+
+    async function loadFile(file) {
+      if (!file) return;
+      if (!/^image\//.test(file.type)) {
+        errorEl.textContent = "That file is not an image.";
+        return;
+      }
+      try {
+        if (typeof createImageBitmap === "function") {
+          try {
+            source = await createImageBitmap(file);
+          } catch (e) {
+            source = await loadAsImage(file);
+          }
+        } else {
+          source = await loadAsImage(file);
+        }
+        errorEl.textContent = "";
+        generate();
+      } catch (e) {
+        errorEl.textContent = e && e.message ? e.message : String(e);
+        setStatus("bad", "error", "");
+      }
+    }
+
+    function iconCanvas(size) {
+      var canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      var ctx = canvas.getContext("2d");
+      if (!transparentChk.checked) {
+        ctx.fillStyle = background.value || "#ffffff";
+        ctx.fillRect(0, 0, size, size);
+      }
+      var pad = size * (Number(padding.value) / 100);
+      var box = Math.max(1, size - pad * 2);
+      var iw = source.naturalWidth || source.width;
+      var ih = source.naturalHeight || source.height;
+      var scale = fitSel.value === "cover" ? Math.max(box / iw, box / ih) : Math.min(box / iw, box / ih);
+      var w = iw * scale;
+      var h = ih * scale;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.save();
+      if (fitSel.value === "cover") {
+        ctx.beginPath();
+        ctx.rect(pad, pad, box, box);
+        ctx.clip();
+      }
+      ctx.drawImage(source, (size - w) / 2, (size - h) / 2, w, h);
+      ctx.restore();
+      return canvas;
+    }
+
+    function canvasToBlob(canvas) {
+      return new Promise(function (resolve) { canvas.toBlob(resolve, "image/png"); });
+    }
+
+    function buildIco(entries) {
+      var count = entries.length;
+      var headerSize = 6 + 16 * count;
+      var total = headerSize + entries.reduce(function (sum, entry) { return sum + entry.bytes.byteLength; }, 0);
+      var buffer = new ArrayBuffer(total);
+      var view = new DataView(buffer);
+      var bytes = new Uint8Array(buffer);
+
+      view.setUint16(0, 0, true);
+      view.setUint16(2, 1, true);
+      view.setUint16(4, count, true);
+
+      var offset = headerSize;
+      entries.forEach(function (entry, index) {
+        var pos = 6 + 16 * index;
+        bytes[pos] = entry.size >= 256 ? 0 : entry.size;
+        bytes[pos + 1] = entry.size >= 256 ? 0 : entry.size;
+        bytes[pos + 2] = 0;
+        bytes[pos + 3] = 0;
+        view.setUint16(pos + 4, 1, true);
+        view.setUint16(pos + 6, 32, true);
+        view.setUint32(pos + 8, entry.bytes.byteLength, true);
+        view.setUint32(pos + 12, offset, true);
+        bytes.set(new Uint8Array(entry.bytes), offset);
+        offset += entry.bytes.byteLength;
+      });
+      return new Blob([buffer], { type: "image/x-icon" });
+    }
+
+    async function generate() {
+      if (!source) {
+        setStatus("muted", "waiting for image", "");
+        return;
+      }
+      var myGeneration = ++generation;
+      errorEl.textContent = "";
+      revokePreviews();
+      iconGrid.innerHTML = "";
+      iconBlobs = Object.create(null);
+      setStatus("muted", "generating…", "");
+
+      var entries = [];
+      for (var i = 0; i < SIZES.length; i++) {
+        var size = SIZES[i];
+        var canvas = iconCanvas(size);
+        var blob = await canvasToBlob(canvas);
+        if (myGeneration !== generation) return;
+        if (!blob) continue;
+        iconBlobs[size] = blob;
+        if (size === 16 || size === 32 || size === 48) {
+          entries.push({ size: size, bytes: await blob.arrayBuffer() });
+        }
+
+        var card = document.createElement("div");
+        card.className = "icon-card";
+        var preview = document.createElement("canvas");
+        preview.width = size;
+        preview.height = size;
+        preview.getContext("2d").drawImage(canvas, 0, 0);
+        preview.style.width = Math.min(size, 96) + "px";
+        preview.style.height = Math.min(size, 96) + "px";
+        var label = document.createElement("div");
+        label.className = "hint";
+        label.textContent = size + " × " + size;
+        var link = document.createElement("a");
+        link.className = "button-link";
+        link.style.fontSize = "0.75rem";
+        link.style.padding = "0.25rem 0.6rem";
+        link.textContent = "PNG";
+        link.href = URL.createObjectURL(blob);
+        previewUrls.push(link.href);
+        link.download = "favicon-" + size + "x" + size + ".png";
+        card.appendChild(preview);
+        card.appendChild(label);
+        card.appendChild(link);
+        iconGrid.appendChild(card);
+      }
+
+      if (myGeneration !== generation) return;
+      if (entries.length === 3) {
+        var icoBlob = buildIco(entries);
+        icoUrl = URL.createObjectURL(icoBlob);
+        icoDownload.href = icoUrl;
+        icoDownload.classList.remove("disabled");
+        icoInfo.textContent = "favicon.ico · 16, 32 and 48 px · " + Toolkit.formatBytes(icoBlob.size);
+      }
+      setStatus("ok", "icons ready", SIZES.length + " sizes generated");
+    }
+
+    var schedule = Toolkit.debounce(function () { if (source) generate(); }, 220);
+
+    dropZone.addEventListener("click", function () { fileInput.click(); });
+    dropZone.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInput.click(); }
+    });
+    dropZone.addEventListener("dragover", function (e) { e.preventDefault(); dropZone.classList.add("dragging"); });
+    dropZone.addEventListener("dragleave", function () { dropZone.classList.remove("dragging"); });
+    dropZone.addEventListener("drop", function (e) {
+      e.preventDefault();
+      dropZone.classList.remove("dragging");
+      loadFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener("change", function () { loadFile(fileInput.files[0]); });
+
+    document.getElementById("sampleBtn").addEventListener("click", function () {
+      var sample = document.createElement("canvas");
+      sample.width = 512;
+      sample.height = 512;
+      var ctx = sample.getContext("2d");
+      var gradient = ctx.createLinearGradient(0, 0, 512, 512);
+      gradient.addColorStop(0, "#7c4dff");
+      gradient.addColorStop(1, "#ff7a59");
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, 512, 512);
+      ctx.fillStyle = "#ffffff";
+      ctx.font = "bold 190px -apple-system, BlinkMacSystemFont, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillText("WT", 256, 270);
+      source = sample;
+      generate();
+    });
+
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      revokePreviews();
+      source = null;
+      iconGrid.innerHTML = "";
+      icoInfo.textContent = "Generate icons to build a multi-size ICO.";
+      fileInput.value = "";
+      errorEl.textContent = "";
+      setStatus("muted", "waiting for image", "");
+    });
+    copySnippetBtn.addEventListener("click", function () {
+      Toolkit.copyText(SNIPPET).then(function () { Toolkit.flash(copySnippetBtn, "Copied!"); });
+    });
+    padding.addEventListener("input", function () {
+      paddingValue.textContent = padding.value + "%";
+      schedule();
+    });
+    fitSel.addEventListener("change", schedule);
+    transparentChk.addEventListener("change", function () {
+      background.disabled = transparentChk.checked;
+      schedule();
+    });
+    background.addEventListener("change", schedule);
+
+    snippet.textContent = SNIPPET;
+    background.disabled = transparentChk.checked;
+    setStatus("muted", "waiting for image", "");
+  </script>
+</body>
+</html>

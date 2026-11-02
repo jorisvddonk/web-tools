@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>color converter &amp; contrast checker</title>
+  <meta name="description" content="Convert colors between HEX, RGB, HSL, HSV and OKLCH, and check WCAG contrast ratios.">
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .swatch { width: 3.5rem; height: 3.5rem; border-radius: 8px; border: 1px solid var(--border); flex: 0 0 auto; }
+    .contrast-preview { border-radius: 10px; padding: 1.2rem; text-align: center; font-size: 1.15rem; }
+    .badge-row { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.5rem; }
+    .ratio { font-size: 2rem; font-weight: 700; font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <main>
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>color converter &amp; contrast checker</h1>
+    <p class="subtitle">Convert HEX, RGB, HSL, HSV and OKLCH, and check WCAG contrast. Runs locally.</p>
+
+    <section class="card" style="margin-top:0">
+      <h2>Color converter</h2>
+      <div class="row" style="margin-top:0">
+        <input type="color" id="picker" value="#7c4dff" style="width:4rem;height:3.2rem;padding:0.15rem">
+        <div class="swatch" id="swatch" style="background:#7c4dff"></div>
+        <input type="text" id="hexInput" value="#7c4dff" spellcheck="false" autocomplete="off" style="width:10rem;flex:0 0 auto" class="mono">
+        <span id="colorStatus" class="hint"></span>
+      </div>
+      <div class="error" id="colorError" role="alert"></div>
+      <table style="margin-top:0.75rem">
+        <tbody id="converterRows"></tbody>
+      </table>
+    </section>
+
+    <section class="card">
+      <h2>Contrast checker</h2>
+      <div class="row" style="margin-top:0">
+        <label for="fgPicker" style="margin:0">Text</label>
+        <input type="color" id="fgPicker" value="#1d1c1a" style="width:3rem;height:2.4rem;padding:0.1rem">
+        <input type="text" id="fgHex" value="#1d1c1a" spellcheck="false" autocomplete="off" style="width:8rem;flex:0 0 auto" class="mono">
+        <label for="bgPicker" style="margin:0 0 0 0.75rem">Background</label>
+        <input type="color" id="bgPicker" value="#f7f6f3" style="width:3rem;height:2.4rem;padding:0.1rem">
+        <input type="text" id="bgHex" value="#f7f6f3" spellcheck="false" autocomplete="off" style="width:8rem;flex:0 0 auto" class="mono">
+        <button id="swapColorsBtn" type="button" class="secondary">Swap</button>
+      </div>
+      <div class="error" id="contrastError" role="alert"></div>
+
+      <div class="grid" style="margin-top:0.75rem">
+        <div>
+          <div class="ratio" id="ratio">—</div>
+          <div class="hint" id="ratioHint"></div>
+          <div class="badge-row" id="contrastBadges"></div>
+        </div>
+        <div class="contrast-preview" id="contrastPreview">
+          The quick brown fox jumps over the lazy dog.
+        </div>
+      </div>
+      <div class="hint" style="margin-top:0.75rem">Alpha is ignored for contrast calculations.</div>
+    </section>
+  </main>
+
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var picker = document.getElementById("picker");
+    var swatch = document.getElementById("swatch");
+    var hexInput = document.getElementById("hexInput");
+    var colorStatus = document.getElementById("colorStatus");
+    var colorError = document.getElementById("colorError");
+    var converterRows = document.getElementById("converterRows");
+    var fgPicker = document.getElementById("fgPicker");
+    var fgHex = document.getElementById("fgHex");
+    var bgPicker = document.getElementById("bgPicker");
+    var bgHex = document.getElementById("bgHex");
+    var contrastError = document.getElementById("contrastError");
+    var ratioEl = document.getElementById("ratio");
+    var ratioHint = document.getElementById("ratioHint");
+    var contrastBadges = document.getElementById("contrastBadges");
+    var contrastPreview = document.getElementById("contrastPreview");
+
+    function clamp(value, min, max) { return Math.min(max, Math.max(min, value)); }
+
+    function parseColor(input) {
+      var value = String(input).trim().toLowerCase();
+      var match;
+
+      if ((match = /^#([0-9a-f]{3})$/.exec(value))) {
+        return {
+          r: parseInt(match[1][0] + match[1][0], 16),
+          g: parseInt(match[1][1] + match[1][1], 16),
+          b: parseInt(match[1][2] + match[1][2], 16),
+          a: 1
+        };
+      }
+      if ((match = /^#([0-9a-f]{6})([0-9a-f]{2})?$/.exec(value))) {
+        return {
+          r: parseInt(match[1].slice(0, 2), 16),
+          g: parseInt(match[1].slice(2, 4), 16),
+          b: parseInt(match[1].slice(4, 6), 16),
+          a: match[2] ? parseInt(match[2], 16) / 255 : 1
+        };
+      }
+      if ((match = /^rgba?\(\s*(\d{1,3})\s*[, ]\s*(\d{1,3})\s*[, ]\s*(\d{1,3})(?:\s*[,/]\s*([\d.]+))?\s*\)$/.exec(value))) {
+        return {
+          r: clamp(Number(match[1]), 0, 255),
+          g: clamp(Number(match[2]), 0, 255),
+          b: clamp(Number(match[3]), 0, 255),
+          a: match[4] !== undefined ? clamp(Number(match[4]), 0, 1) : 1
+        };
+      }
+      if ((match = /^hsla?\(\s*([\d.]+)\s*[, ]\s*([\d.]+)%\s*[, ]\s*([\d.]+)%(?:\s*[,/]\s*([\d.]+))?\s*\)$/.exec(value))) {
+        var hsl = { h: ((Number(match[1]) % 360) + 360) % 360, s: clamp(Number(match[2]), 0, 100), l: clamp(Number(match[3]), 0, 100) };
+        var rgb = hslToRgb(hsl.h, hsl.s, hsl.l);
+        rgb.a = match[4] !== undefined ? clamp(Number(match[4]), 0, 1) : 1;
+        return rgb;
+      }
+      return null;
+    }
+
+    function hslToRgb(h, s, l) {
+      h = ((h % 360) + 360) % 360 / 360;
+      s /= 100;
+      l /= 100;
+      if (s === 0) {
+        var gray = Math.round(l * 255);
+        return { r: gray, g: gray, b: gray };
+      }
+      var q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+      var p = 2 * l - q;
+      function channel(t) {
+        if (t < 0) t += 1;
+        if (t > 1) t -= 1;
+        if (t < 1 / 6) return p + (q - p) * 6 * t;
+        if (t < 1 / 2) return q;
+        if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+        return p;
+      }
+      return {
+        r: Math.round(channel(h + 1 / 3) * 255),
+        g: Math.round(channel(h) * 255),
+        b: Math.round(channel(h - 1 / 3) * 255)
+      };
+    }
+
+    function rgbToHsl(r, g, b) {
+      r /= 255; g /= 255; b /= 255;
+      var max = Math.max(r, g, b), min = Math.min(r, g, b);
+      var h = 0, s = 0, l = (max + min) / 2;
+      if (max !== min) {
+        var d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        if (max === r) h = (g - b) / d + (g < b ? 6 : 0);
+        else if (max === g) h = (b - r) / d + 2;
+        else h = (r - g) / d + 4;
+        h /= 6;
+      }
+      return { h: Math.round(h * 360), s: Math.round(s * 100), l: Math.round(l * 100) };
+    }
+
+    function rgbToHsv(r, g, b) {
+      r /= 255; g /= 255; b /= 255;
+      var max = Math.max(r, g, b), min = Math.min(r, g, b);
+      var d = max - min;
+      var h = 0;
+      if (d !== 0) {
+        if (max === r) h = ((g - b) / d + (g < b ? 6 : 0)) / 6;
+        else if (max === g) h = ((b - r) / d + 2) / 6;
+        else h = ((r - g) / d + 4) / 6;
+      }
+      return { h: Math.round(h * 360), s: Math.round((max === 0 ? 0 : d / max) * 100), v: Math.round(max * 100) };
+    }
+
+    function srgbToLinear(value) {
+      value /= 255;
+      return value <= 0.04045 ? value / 12.92 : Math.pow((value + 0.055) / 1.055, 2.4);
+    }
+
+    function rgbToOklch(r, g, b) {
+      var lr = srgbToLinear(r), lg = srgbToLinear(g), lb = srgbToLinear(b);
+      var l = 0.4122214708 * lr + 0.5363325363 * lg + 0.0514459929 * lb;
+      var m = 0.2119034982 * lr + 0.6806995451 * lg + 0.1073969566 * lb;
+      var s = 0.0883024619 * lr + 0.2817188376 * lg + 0.6299787005 * lb;
+      var l_ = Math.cbrt(l), m_ = Math.cbrt(m), s_ = Math.cbrt(s);
+      var L = 0.2104542553 * l_ + 0.7936177850 * m_ - 0.0040720468 * s_;
+      var a = 1.9779984951 * l_ - 2.4285922050 * m_ + 0.4505937099 * s_;
+      var bb = 0.0259040371 * l_ + 0.7827717662 * m_ - 0.8086757660 * s_;
+      var C = Math.sqrt(a * a + bb * bb);
+      var h = Math.atan2(bb, a) * 180 / Math.PI;
+      if (h < 0) h += 360;
+      return { L: L * 100, C: C, h: h };
+    }
+
+    function toHex(color) {
+      function hex(value) { return Math.round(clamp(value, 0, 255)).toString(16).padStart(2, "0"); }
+      return ("#" + hex(color.r) + hex(color.g) + hex(color.b)).toUpperCase();
+    }
+
+    function luminance(color) {
+      return 0.2126 * srgbToLinear(color.r) + 0.7152 * srgbToLinear(color.g) + 0.0722 * srgbToLinear(color.b);
+    }
+
+    function contrastRatio(a, b) {
+      var l1 = luminance(a), l2 = luminance(b);
+      var lighter = Math.max(l1, l2), darker = Math.min(l1, l2);
+      return (lighter + 0.05) / (darker + 0.05);
+    }
+
+    function addRow(label, value) {
+      var tr = document.createElement("tr");
+      var nameTd = document.createElement("td");
+      nameTd.textContent = label;
+      nameTd.style.whiteSpace = "nowrap";
+      var valueTd = document.createElement("td");
+      valueTd.className = "mono";
+      valueTd.textContent = value;
+      var actionTd = document.createElement("td");
+      var btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "secondary tiny";
+      btn.textContent = "Copy";
+      btn.addEventListener("click", function () {
+        Toolkit.copyText(value).then(function () { Toolkit.flash(btn, "Copied!"); });
+      });
+      actionTd.appendChild(btn);
+      tr.appendChild(nameTd);
+      tr.appendChild(valueTd);
+      tr.appendChild(actionTd);
+      converterRows.appendChild(tr);
+    }
+
+    function renderConverter(color) {
+      converterRows.innerHTML = "";
+      var hsl = rgbToHsl(color.r, color.g, color.b);
+      var hsv = rgbToHsv(color.r, color.g, color.b);
+      var oklch = rgbToOklch(color.r, color.g, color.b);
+      addRow("HEX", toHex(color));
+      addRow("RGB", "rgb(" + color.r + ", " + color.g + ", " + color.b + ")");
+      addRow("HSL", "hsl(" + hsl.h + ", " + hsl.s + "%, " + hsl.l + "%)");
+      addRow("HSV", "hsv(" + hsv.h + ", " + hsv.s + "%, " + hsv.v + "%)");
+      addRow("OKLCH", "oklch(" + oklch.L.toFixed(1) + "% " + oklch.C.toFixed(4) + " " + oklch.h.toFixed(1) + ")");
+      addRow("CSS", "color: " + toHex(color) + ";");
+      swatch.style.background = toHex(color);
+    }
+
+    function updateConverter() {
+      var color = parseColor(hexInput.value);
+      if (!color) {
+        colorError.textContent = "Enter a HEX, rgb() or hsl() color.";
+        colorStatus.textContent = "";
+        return;
+      }
+      colorError.textContent = "";
+      colorStatus.textContent = color.a < 1 ? "alpha " + color.a.toFixed(2) : "";
+      picker.value = toHex(color).toLowerCase();
+      renderConverter(color);
+    }
+
+    function updateContrast() {
+      var fgColor = parseColor(fgHex.value);
+      var bgColor = parseColor(bgHex.value);
+      if (!fgColor || !bgColor) {
+        contrastError.textContent = "Both colors must be valid HEX, rgb() or hsl() values.";
+        ratioEl.textContent = "—";
+        contrastBadges.innerHTML = "";
+        return;
+      }
+      contrastError.textContent = "";
+      var ratio = contrastRatio(fgColor, bgColor);
+      ratioEl.textContent = ratio.toFixed(2) + " : 1";
+      var passes = {
+        "AA normal": ratio >= 4.5,
+        "AAA normal": ratio >= 7,
+        "AA large": ratio >= 3,
+        "AAA large": ratio >= 4.5
+      };
+      contrastBadges.innerHTML = "";
+      Object.keys(passes).forEach(function (name) {
+        var span = document.createElement("span");
+        span.className = "badge " + (passes[name] ? "ok" : "bad");
+        span.textContent = name + " " + (passes[name] ? "pass" : "fail");
+        contrastBadges.appendChild(span);
+      });
+      ratioHint.textContent = ratio >= 4.5 ? "Good for normal text." : ratio >= 3 ? "Only large text / UI components." : "Low contrast.";
+      contrastPreview.style.color = toHex(fgColor);
+      contrastPreview.style.background = toHex(bgColor);
+      fgPicker.value = toHex(fgColor).toLowerCase();
+      bgPicker.value = toHex(bgColor).toLowerCase();
+    }
+
+    picker.addEventListener("input", function () {
+      hexInput.value = picker.value;
+      updateConverter();
+    });
+    hexInput.addEventListener("input", updateConverter);
+    fgPicker.addEventListener("input", function () { fgHex.value = fgPicker.value; updateContrast(); });
+    bgPicker.addEventListener("input", function () { bgHex.value = bgPicker.value; updateContrast(); });
+    fgHex.addEventListener("input", updateContrast);
+    bgHex.addEventListener("input", updateContrast);
+    document.getElementById("swapColorsBtn").addEventListener("click", function () {
+      var fg = fgHex.value;
+      fgHex.value = bgHex.value;
+      bgHex.value = fg;
+      updateContrast();
+    });
+
+    updateConverter();
+    updateContrast();
+  </script>
+</body>
+</html>

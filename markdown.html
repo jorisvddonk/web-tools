@@ -1,0 +1,357 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>markdown table formatter</title>
+  <meta name="description" content="Format Markdown tables, or convert CSV/TSV into a clean Markdown table with alignment.">
+  <link rel="stylesheet" href="./style.css">
+</head>
+<body>
+  <main class="wide">
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>markdown table formatter</h1>
+    <p class="subtitle">Paste a messy Markdown table or CSV/TSV and get a clean, aligned table. Runs locally.</p>
+
+    <label for="input">Table input</label>
+    <textarea id="input" class="tall" spellcheck="false" placeholder="| name | qty |\n|---|--:|\n| Ada | 2 |"></textarea>
+
+    <div class="row" style="margin-top:0">
+      <label for="alignSel" style="margin:0">Alignment</label>
+      <select id="alignSel" aria-label="Column alignment">
+        <option value="auto" selected>Auto (numbers right)</option>
+        <option value="left">Left</option>
+        <option value="center">Center</option>
+        <option value="right">Right</option>
+      </select>
+      <label><input type="checkbox" id="compactChk"> Compact (no padding)</label>
+      <span class="spacer"></span>
+      <button id="exampleBtn" type="button" class="secondary">Load example</button>
+    </div>
+
+    <div class="opts">
+      <label><input type="checkbox" id="liveChk" checked> Format live</label>
+      <span class="hint" id="detectedHint"></span>
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="statusBadge" class="badge muted">waiting for input</span>
+      <span id="statusHint" class="hint"></span>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+
+    <label for="output">Markdown</label>
+    <textarea id="output" class="tall" readonly spellcheck="false"></textarea>
+
+    <div class="row">
+      <button id="formatBtn" type="button">Format</button>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+      <span class="spacer"></span>
+      <button id="copyBtn" type="button" class="secondary">Copy Markdown</button>
+    </div>
+    <div class="stats" id="stats"></div>
+
+    <section class="card">
+      <h2>Preview</h2>
+      <div style="overflow-x:auto">
+        <table id="previewTable"></table>
+      </div>
+      <div class="hint" id="previewEmpty">No table yet.</div>
+    </section>
+  </main>
+
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var input = document.getElementById("input");
+    var output = document.getElementById("output");
+    var alignSel = document.getElementById("alignSel");
+    var compactChk = document.getElementById("compactChk");
+    var liveChk = document.getElementById("liveChk");
+    var detectedHint = document.getElementById("detectedHint");
+    var statusBadge = document.getElementById("statusBadge");
+    var statusHint = document.getElementById("statusHint");
+    var errorEl = document.getElementById("error");
+    var statsEl = document.getElementById("stats");
+    var previewTable = document.getElementById("previewTable");
+    var previewEmpty = document.getElementById("previewEmpty");
+
+    var EXAMPLE = "| name| role | notes |\n" +
+      "|----|:---|----:|\n" +
+      "| Ada | engineer | 2 |\n" +
+      "| Grace | admiral | 10 |\n" +
+      "| Katherine Johnson | computer | 3 |";
+
+    function splitMarkdownRow(line) {
+      var value = line.trim();
+      if (value.charAt(0) === "|") value = value.slice(1);
+      if (value.charAt(value.length - 1) === "|") value = value.slice(0, -1);
+
+      var cells = [];
+      var current = "";
+      var escaped = false;
+      for (var i = 0; i < value.length; i++) {
+        var c = value[i];
+        if (escaped) {
+          if (c !== "|") current += "\\";
+          current += c;
+          escaped = false;
+        } else if (c === "\\") {
+          escaped = true;
+        } else if (c === "|") {
+          cells.push(current.trim());
+          current = "";
+        } else {
+          current += c;
+        }
+      }
+      cells.push(current.trim());
+      return cells;
+    }
+
+    function isSeparator(row) {
+      return row.length > 0 && row.every(function (cell) {
+        return /^:?-{3,}:?$/.test(cell.trim());
+      });
+    }
+
+    function detectCsvDelimiter(text) {
+      var line = text.split(/\r?\n/).find(function (row) { return row.trim() !== ""; }) || "";
+      var tabs = (line.match(/\t/g) || []).length;
+      var commas = (line.match(/,/g) || []).length;
+      var semis = (line.match(/;/g) || []).length;
+      if (tabs > commas && tabs > semis) return "\t";
+      if (semis > commas) return ";";
+      return ",";
+    }
+
+    function parseCsv(text, delimiter) {
+      var rows = [];
+      var row = [];
+      var field = "";
+      var inQuotes = false;
+      var source = text.replace(/^\uFEFF/, "");
+
+      for (var i = 0; i < source.length; i++) {
+        var c = source[i];
+        if (inQuotes) {
+          if (c === '"') {
+            if (source[i + 1] === '"') { field += '"'; i++; }
+            else inQuotes = false;
+          } else field += c;
+        } else if (c === '"') inQuotes = true;
+        else if (c === delimiter) { row.push(field); field = ""; }
+        else if (c === "\n" || c === "\r") {
+          if (c === "\r" && source[i + 1] === "\n") i++;
+          row.push(field);
+          rows.push(row);
+          row = [];
+          field = "";
+        } else field += c;
+      }
+      if (field !== "" || row.length) {
+        row.push(field);
+        rows.push(row);
+      }
+      return rows;
+    }
+
+    function parseInput(text) {
+      var lines = text.replace(/\r\n?/g, "\n").split("\n");
+      var hasPipes = lines.some(function (line) { return line.indexOf("|") !== -1; });
+      var rows = [];
+      var kind = "";
+
+      if (hasPipes) {
+        kind = "Markdown table";
+        lines.forEach(function (line) {
+          if (!line.trim()) return;
+          var row = splitMarkdownRow(line);
+          if (!isSeparator(row)) rows.push(row);
+        });
+      } else {
+        var delimiter = detectCsvDelimiter(text);
+        kind = delimiter === "\t" ? "TSV" : delimiter === ";" ? "semicolon-separated" : "CSV";
+        rows = parseCsv(text, delimiter).filter(function (row) {
+          return !(row.length === 1 && row[0] === "");
+        });
+      }
+
+      var width = rows.reduce(function (max, row) { return Math.max(max, row.length); }, 0);
+      rows = rows.map(function (row) {
+        var copy = row.slice();
+        while (copy.length < width) copy.push("");
+        return copy;
+      });
+      return { rows: rows, kind: kind };
+    }
+
+    function isNumeric(value) {
+      return /^[-+]?\s*[$€£]?\s*\d[\d,._]*(%|\s*[A-Za-z]{1,3})?$/.test(value.trim());
+    }
+
+    function alignmentsFor(rows) {
+      var width = rows[0].length;
+      var result = [];
+      for (var col = 0; col < width; col++) {
+        if (alignSel.value !== "auto") {
+          result.push(alignSel.value);
+        } else {
+          var cells = rows.slice(1).map(function (row) { return row[col] || ""; }).filter(function (value) { return value.trim() !== ""; });
+          result.push(cells.length && cells.every(isNumeric) ? "right" : "left");
+        }
+      }
+      return result;
+    }
+
+    function formatTable(rows, alignments, compact) {
+      var width = rows[0].length;
+      var widths = new Array(width).fill(3);
+
+      function displayCell(value) {
+        return String(value).replace(/\|/g, "\\|").replace(/\n/g, "<br>");
+      }
+
+      if (!compact) {
+        rows.forEach(function (row) {
+          row.forEach(function (cell, index) {
+            widths[index] = Math.max(widths[index], displayCell(cell).length);
+          });
+        });
+      }
+
+      function pad(value, index) {
+        var text = displayCell(value);
+        if (compact) return text;
+        var padding = Math.max(0, widths[index] - text.length);
+        if (alignments[index] === "right") return new Array(padding + 1).join(" ") + text;
+        if (alignments[index] === "center") {
+          var left = Math.floor(padding / 2);
+          return new Array(left + 1).join(" ") + text + new Array(padding - left + 1).join(" ");
+        }
+        return text + new Array(padding + 1).join(" ");
+      }
+
+      function separator(index) {
+        var dashes = new Array(widths[index] + 1).join("-");
+        if (alignments[index] === "center") return ":" + dashes.slice(1) + ":";
+        if (alignments[index] === "right") return dashes.slice(0, -1) + ":";
+        if (alignments[index] === "left") return ":" + dashes.slice(1);
+        return dashes;
+      }
+
+      var lines = [];
+      rows.forEach(function (row, rowIndex) {
+        lines.push("| " + row.map(pad).join(" | ") + " |");
+        if (rowIndex === 0) {
+          lines.push("| " + alignments.map(function (_, index) { return separator(index); }).join(" | ") + " |");
+        }
+      });
+      return lines.join("\n");
+    }
+
+    function renderPreview(rows, alignments) {
+      previewTable.innerHTML = "";
+      if (!rows.length) {
+        previewEmpty.classList.remove("hidden");
+        previewEmpty.textContent = "No table yet.";
+        return;
+      }
+      previewEmpty.classList.add("hidden");
+
+      var thead = document.createElement("thead");
+      var headRow = document.createElement("tr");
+      rows[0].forEach(function (cell, index) {
+        var th = document.createElement("th");
+        th.textContent = cell;
+        th.style.textAlign = alignments[index];
+        headRow.appendChild(th);
+      });
+      thead.appendChild(headRow);
+      previewTable.appendChild(thead);
+
+      var tbody = document.createElement("tbody");
+      rows.slice(1, 101).forEach(function (row) {
+        var tr = document.createElement("tr");
+        row.forEach(function (cell, index) {
+          var td = document.createElement("td");
+          td.className = "mono";
+          td.textContent = cell;
+          td.style.textAlign = alignments[index];
+          tr.appendChild(td);
+        });
+        tbody.appendChild(tr);
+      });
+      previewTable.appendChild(tbody);
+    }
+
+    function format() {
+      errorEl.textContent = "";
+      if (!input.value.trim()) {
+        output.value = "";
+        previewTable.innerHTML = "";
+        previewEmpty.classList.remove("hidden");
+        previewEmpty.textContent = "No table yet.";
+        detectedHint.textContent = "";
+        statusBadge.className = "badge muted";
+        statusBadge.textContent = "waiting for input";
+        statusHint.textContent = "";
+        statsEl.textContent = "";
+        return;
+      }
+
+      try {
+        var parsed = parseInput(input.value);
+        if (!parsed.rows.length) throw new Error("No table rows found.");
+        var alignments = alignmentsFor(parsed.rows);
+        output.value = formatTable(parsed.rows, alignments, compactChk.checked);
+        renderPreview(parsed.rows, alignments);
+        detectedHint.textContent = parsed.kind + " detected";
+        statusBadge.className = "badge ok";
+        statusBadge.textContent = "formatted";
+        statusHint.textContent = parsed.rows.length + " row(s) × " + parsed.rows[0].length + " column(s)";
+        statsEl.textContent = output.value.split("\n").length + " lines · " + output.value.length + " chars";
+      } catch (e) {
+        output.value = "";
+        previewTable.innerHTML = "";
+        previewEmpty.classList.remove("hidden");
+        previewEmpty.textContent = "No table.";
+        statusBadge.className = "badge bad";
+        statusBadge.textContent = "cannot format";
+        statusHint.textContent = "";
+        statsEl.textContent = "";
+        errorEl.textContent = e && e.message ? e.message : String(e);
+      }
+    }
+
+    var schedule = Toolkit.debounce(format, 180);
+
+    document.getElementById("formatBtn").addEventListener("click", format);
+    document.getElementById("exampleBtn").addEventListener("click", function () {
+      input.value = EXAMPLE;
+      format();
+    });
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      input.value = "";
+      format();
+      input.focus();
+    });
+    document.getElementById("copyBtn").addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(output.value).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    input.addEventListener("input", function () { if (liveChk.checked) schedule(); });
+    alignSel.addEventListener("change", format);
+    compactChk.addEventListener("change", format);
+    document.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        format();
+      }
+    });
+
+    statusBadge.className = "badge muted";
+    statusBadge.textContent = "waiting for input";
+  </script>
+</body>
+</html>

@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>qr code generator / decoder</title>
+  <meta name="description" content="Generate QR codes and decode them from images locally in your browser.">
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    #qrCanvas { width: 100%; max-width: 20rem; height: auto; image-rendering: pixelated; border: 1px solid var(--border); border-radius: 8px; background: #fff; }
+    #decodeZone { border: 2px dashed var(--border); border-radius: 10px; padding: 1.25rem; text-align: center; cursor: pointer; background: #fff; }
+    #decodeZone.dragging { border-color: var(--accent); background: #faf8ff; }
+    #decodedPreview { max-width: 100%; max-height: 14rem; border-radius: 6px; }
+  </style>
+</head>
+<body>
+  <main class="wide">
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>qr code generator / decoder</h1>
+    <p class="subtitle">Generate QR codes and read them from images. Everything runs in your browser.</p>
+
+    <div class="grid">
+      <section class="card" style="margin-top:0">
+        <h2>Generate</h2>
+        <label for="text">Text or URL</label>
+        <textarea id="text" style="min-height:5em" spellcheck="false">https://example.com</textarea>
+
+        <div class="row">
+          <label for="sizeSel" style="margin:0">Size</label>
+          <select id="sizeSel">
+            <option value="256">256 px</option>
+            <option value="512" selected>512 px</option>
+            <option value="1024">1024 px</option>
+          </select>
+          <label for="eclSel" style="margin:0 0 0 0.5rem">Error correction</label>
+          <select id="eclSel">
+            <option value="L">L (7%)</option>
+            <option value="M" selected>M (15%)</option>
+            <option value="Q">Q (25%)</option>
+            <option value="H">H (30%)</option>
+          </select>
+        </div>
+
+        <div class="row">
+          <label for="margin" style="margin:0">Margin</label>
+          <input type="number" id="margin" min="0" max="8" value="2" style="width:5rem">
+          <label for="fg" style="margin:0 0 0 0.5rem">Foreground</label>
+          <input type="color" id="fg" value="#1d1c1a" style="width:3rem;height:2.4rem;padding:0.1rem">
+          <label for="bg" style="margin:0 0 0 0.5rem">Background</label>
+          <input type="color" id="bg" value="#ffffff" style="width:3rem;height:2.4rem;padding:0.1rem">
+        </div>
+
+        <div class="row" style="margin-top:0.75rem">
+          <span id="genBadge" class="badge muted">waiting</span>
+          <span class="spacer"></span>
+          <button id="downloadBtn" type="button" class="secondary" disabled>Download PNG</button>
+          <button id="decodeGenBtn" type="button" class="secondary">Decode this QR</button>
+        </div>
+        <div class="error" id="genError" role="alert"></div>
+        <div style="margin-top:0.75rem">
+          <canvas id="qrCanvas" width="512" height="512"></canvas>
+        </div>
+      </section>
+
+      <section class="card" style="margin-top:0">
+        <h2>Decode an image</h2>
+        <div id="decodeZone" role="button" tabindex="0">
+          <strong>Drop a QR image here</strong> or click to choose
+          <input type="file" id="decodeInput" accept="image/*" class="hidden">
+        </div>
+        <div style="margin-top:0.75rem;text-align:center">
+          <img id="decodedPreview" class="hidden" alt="Uploaded QR preview">
+        </div>
+        <div class="row" style="margin-top:0.75rem">
+          <span id="decodeBadge" class="badge muted">waiting</span>
+          <span class="spacer"></span>
+          <button id="copyDecodedBtn" type="button" class="secondary" disabled>Copy</button>
+        </div>
+        <div class="error" id="decodeError" role="alert"></div>
+        <label for="decodedText" style="margin-top:0.5rem">Decoded text</label>
+        <textarea id="decodedText" readonly spellcheck="false"></textarea>
+      </section>
+    </div>
+
+    <footer>
+      QR generation uses <span class="mono">qrcode</span>; decoding uses <span class="mono">jsQR</span>.
+      Library files load from a CDN; images never leave your browser.
+    </footer>
+  </main>
+
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var text = document.getElementById("text");
+    var sizeSel = document.getElementById("sizeSel");
+    var eclSel = document.getElementById("eclSel");
+    var margin = document.getElementById("margin");
+    var fg = document.getElementById("fg");
+    var bg = document.getElementById("bg");
+    var genBadge = document.getElementById("genBadge");
+    var genError = document.getElementById("genError");
+    var downloadBtn = document.getElementById("downloadBtn");
+    var qrCanvas = document.getElementById("qrCanvas");
+    var decodeZone = document.getElementById("decodeZone");
+    var decodeInput = document.getElementById("decodeInput");
+    var decodedPreview = document.getElementById("decodedPreview");
+    var decodeBadge = document.getElementById("decodeBadge");
+    var decodeError = document.getElementById("decodeError");
+    var decodedText = document.getElementById("decodedText");
+    var copyDecodedBtn = document.getElementById("copyDecodedBtn");
+
+    var qrPromise = null;
+    var jsqrPromise = null;
+    var decodeUrl = null;
+    var genTimer = null;
+
+    function getQR() {
+      if (!qrPromise) {
+        qrPromise = import("https://esm.sh/qrcode@1.5.4").catch(function (e) {
+          qrPromise = null;
+          throw new Error("Could not load the QR generator: " + (e && e.message ? e.message : String(e)));
+        });
+      }
+      return qrPromise;
+    }
+
+    function getJsQR() {
+      if (window.jsQR) return Promise.resolve(window.jsQR);
+      if (!jsqrPromise) {
+        jsqrPromise = new Promise(function (resolve, reject) {
+          var script = document.createElement("script");
+          script.src = "https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js";
+          script.onload = function () { window.jsQR ? resolve(window.jsQR) : reject(new Error("jsQR did not initialize.")); };
+          script.onerror = function () { reject(new Error("Could not load the QR decoder.")); };
+          document.head.appendChild(script);
+        }).catch(function (e) {
+          jsqrPromise = null;
+          throw e;
+        });
+      }
+      return jsqrPromise;
+    }
+
+    async function generate() {
+      genError.textContent = "";
+      if (!text.value) {
+        qrCanvas.getContext("2d").clearRect(0, 0, qrCanvas.width, qrCanvas.height);
+        genBadge.className = "badge muted";
+        genBadge.textContent = "waiting";
+        downloadBtn.disabled = true;
+        return;
+      }
+      genBadge.className = "badge muted";
+      genBadge.textContent = "generating…";
+      downloadBtn.disabled = true;
+      try {
+        var QR = await getQR();
+        var size = Number(sizeSel.value);
+        await QR.toCanvas(qrCanvas, text.value, {
+          width: size,
+          margin: Math.max(0, Math.min(8, Number(margin.value) || 0)),
+          errorCorrectionLevel: eclSel.value,
+          color: { dark: fg.value, light: bg.value }
+        });
+        genBadge.className = "badge ok";
+        genBadge.textContent = "generated";
+        downloadBtn.disabled = false;
+      } catch (e) {
+        genBadge.className = "badge bad";
+        genBadge.textContent = "failed";
+        downloadBtn.disabled = true;
+        genError.textContent = e && e.message ? e.message : String(e);
+      }
+    }
+
+    function decodeImageData(sourceCanvas) {
+      var ctx = sourceCanvas.getContext("2d");
+      var image = ctx.getImageData(0, 0, sourceCanvas.width, sourceCanvas.height);
+      return getJsQR().then(function (jsQR) {
+        return jsQR(image.data, image.width, image.height);
+      });
+    }
+
+    async function decodeCanvas(sourceCanvas) {
+      decodeError.textContent = "";
+      decodeBadge.className = "badge muted";
+      decodeBadge.textContent = "decoding…";
+      try {
+        var result = await decodeImageData(sourceCanvas);
+        if (result) {
+          decodedText.value = result.data;
+          decodeBadge.className = "badge ok";
+          decodeBadge.textContent = "decoded";
+          copyDecodedBtn.disabled = false;
+        } else {
+          decodedText.value = "";
+          decodeBadge.className = "badge bad";
+          decodeBadge.textContent = "no QR found";
+          copyDecodedBtn.disabled = true;
+        }
+      } catch (e) {
+        decodedText.value = "";
+        decodeBadge.className = "badge bad";
+        decodeBadge.textContent = "failed";
+        copyDecodedBtn.disabled = true;
+        decodeError.textContent = e && e.message ? e.message : String(e);
+      }
+    }
+
+    async function decodeFile(file) {
+      if (!file) return;
+      if (!/^image\//.test(file.type)) {
+        decodeError.textContent = "That file is not an image.";
+        return;
+      }
+      try {
+        var bitmap;
+        if (typeof createImageBitmap === "function") bitmap = await createImageBitmap(file);
+        else {
+          bitmap = await new Promise(function (resolve, reject) {
+            var image = new Image();
+            var url = URL.createObjectURL(file);
+            image.onload = function () { URL.revokeObjectURL(url); resolve(image); };
+            image.onerror = function () { URL.revokeObjectURL(url); reject(new Error("Could not decode image.")); };
+            image.src = url;
+          });
+        }
+        var maxSide = 1600;
+        var scale = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+        var canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(bitmap.width * scale));
+        canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+        canvas.getContext("2d").drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+
+        if (decodeUrl) URL.revokeObjectURL(decodeUrl);
+        decodeUrl = URL.createObjectURL(file);
+        decodedPreview.src = decodeUrl;
+        decodedPreview.classList.remove("hidden");
+        await decodeCanvas(canvas);
+      } catch (e) {
+        decodeBadge.className = "badge bad";
+        decodeBadge.textContent = "failed";
+        decodeError.textContent = e && e.message ? e.message : String(e);
+      }
+    }
+
+    function schedule() {
+      clearTimeout(genTimer);
+      genTimer = setTimeout(generate, 250);
+    }
+
+    downloadBtn.addEventListener("click", function () {
+      qrCanvas.toBlob(function (blob) {
+        if (blob) Toolkit.download(blob, "qr-code.png");
+      }, "image/png");
+    });
+    document.getElementById("decodeGenBtn").addEventListener("click", function () {
+      decodeCanvas(qrCanvas);
+    });
+    copyDecodedBtn.addEventListener("click", function () {
+      Toolkit.copyText(decodedText.value).then(function () { Toolkit.flash(copyDecodedBtn, "Copied!"); });
+    });
+    text.addEventListener("input", schedule);
+    [sizeSel, eclSel, margin, fg, bg].forEach(function (el) { el.addEventListener("change", generate); });
+    margin.addEventListener("input", schedule);
+
+    decodeZone.addEventListener("click", function () { decodeInput.click(); });
+    decodeZone.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); decodeInput.click(); }
+    });
+    decodeZone.addEventListener("dragover", function (e) { e.preventDefault(); decodeZone.classList.add("dragging"); });
+    decodeZone.addEventListener("dragleave", function () { decodeZone.classList.remove("dragging"); });
+    decodeZone.addEventListener("drop", function (e) {
+      e.preventDefault();
+      decodeZone.classList.remove("dragging");
+      decodeFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+    });
+    decodeInput.addEventListener("change", function () { decodeFile(decodeInput.files[0]); });
+    document.addEventListener("paste", function (e) {
+      var items = e.clipboardData && e.clipboardData.items;
+      if (!items) return;
+      for (var i = 0; i < items.length; i++) {
+        if (items[i].type && items[i].type.indexOf("image/") === 0) {
+          decodeFile(items[i].getAsFile());
+          break;
+        }
+      }
+    });
+
+    generate();
+  </script>
+</body>
+</html>

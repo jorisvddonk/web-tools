@@ -26,6 +26,14 @@
     h1 { font-size: 2.1rem; margin: 0 0 0.35rem; }
     .subtitle { color: var(--muted); margin: 0 0 2.5rem; }
     ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 1rem; }
+    .group {
+      font-size: 0.78rem;
+      text-transform: uppercase;
+      letter-spacing: 0.07em;
+      color: var(--muted);
+      margin: 2.5rem 0 0.8rem;
+      font-weight: 600;
+    }
     li a {
       display: block;
       background: var(--card);
@@ -47,6 +55,7 @@
   <main>
     <h1>web-tools</h1>
     <p class="subtitle">Simple web tools that perform simple functions.</p>
+    <h2 class="group" style="margin-top:0">data &amp; text</h2>
     <ul>
       <li>
         <a href="./json.html">
@@ -61,21 +70,27 @@
         </a>
       </li>
       <li>
-        <a href="./jwt.html">
-          <div class="title">jwt decoder</div>
-          <div class="desc">Inspect JWT headers, payloads and claims, and verify HS256/384/512 signatures.</div>
+        <a href="./json-to-types.html">
+          <div class="title">json to types</div>
+          <div class="desc">Infer TypeScript interfaces, Zod schemas or Go structs from a JSON sample.</div>
         </a>
       </li>
       <li>
-        <a href="./timestamp.html">
-          <div class="title">unix timestamp converter</div>
-          <div class="desc">Convert epoch seconds, milliseconds, microseconds and nanoseconds to human dates and back.</div>
+        <a href="./yaml.html">
+          <div class="title">yaml &harr; json</div>
+          <div class="desc">Convert between YAML and JSON, including multi-document YAML.</div>
         </a>
       </li>
       <li>
-        <a href="./url.html">
-          <div class="title">url &amp; query string inspector</div>
-          <div class="desc">Break a URL into its components, edit query parameters, and rebuild it.</div>
+        <a href="./jsonpath.html">
+          <div class="title">jsonpath tester</div>
+          <div class="desc">Query JSON with JSONPath and see matched values and paths.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./csv.html">
+          <div class="title">csv &harr; json</div>
+          <div class="desc">Convert CSV or TSV to JSON and back, with a table preview.</div>
         </a>
       </li>
       <li>
@@ -91,15 +106,131 @@
         </a>
       </li>
       <li>
-        <a href="./hash.html">
-          <div class="title">hash calculator</div>
-          <div class="desc">Compute SHA-1, SHA-256, SHA-384 and SHA-512 digests of text or files.</div>
+        <a href="./case.html">
+          <div class="title">case converter</div>
+          <div class="desc">Convert between camelCase, snake_case, kebab-case, CONSTANT_CASE, slug and more.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./lines.html">
+          <div class="title">line tools</div>
+          <div class="desc">Sort, dedupe, trim, reverse, shuffle and number lines of text.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./escape.html">
+          <div class="title">escape / unescape</div>
+          <div class="desc">Escape and unescape HTML entities, JSON, Python, shell and URL components.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./unicode.html">
+          <div class="title">unicode inspector</div>
+          <div class="desc">Inspect code points, UTF-8/UTF-16 bytes, graphemes, invisible characters and normalization.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./markdown.html">
+          <div class="title">markdown table formatter</div>
+          <div class="desc">Clean up Markdown tables, or convert CSV/TSV into aligned Markdown.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./env.html">
+          <div class="title">.env &harr; json / yaml</div>
+          <div class="desc">Convert dotenv files to JSON or YAML and back, with quoting and type coercion.</div>
         </a>
       </li>
       <li>
         <a href="./base64.html">
           <div class="title">base64</div>
           <div class="desc">Encode text to base64 and decode it back, entirely in your browser.</div>
+        </a>
+      </li>
+    </ul>
+
+    <h2 class="group">web, time &amp; security</h2>
+    <ul>
+      <li>
+        <a href="./jwt.html">
+          <div class="title">jwt decoder</div>
+          <div class="desc">Inspect JWT headers, payloads and claims, and verify HS256/384/512 signatures.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./url.html">
+          <div class="title">url &amp; query string inspector</div>
+          <div class="desc">Break a URL into its components, edit query parameters, and rebuild it.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./curl.html">
+          <div class="title">curl converter</div>
+          <div class="desc">Turn curl commands into fetch, axios, Python requests or Go code.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./timestamp.html">
+          <div class="title">unix timestamp converter</div>
+          <div class="desc">Convert epoch seconds, milliseconds, microseconds and nanoseconds to human dates and back.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./cron.html">
+          <div class="title">cron expression explainer</div>
+          <div class="desc">Describe cron expressions and preview their next run times.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./hash.html">
+          <div class="title">hash calculator</div>
+          <div class="desc">Compute SHA-1, SHA-256, SHA-384 and SHA-512 digests of text or files.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./uuid.html">
+          <div class="title">uuid / ulid generator</div>
+          <div class="desc">Generate UUID v4, UUID v7, ULID and NanoID values locally.</div>
+        </a>
+      </li>
+    </ul>
+
+    <h2 class="group">images &amp; design</h2>
+    <ul>
+      <li>
+        <a href="./image.html">
+          <div class="title">image resizer / converter</div>
+          <div class="desc">Resize, compress and convert images to JPEG, PNG, WebP or AVIF.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./favicon.html">
+          <div class="title">favicon generator</div>
+          <div class="desc">Generate favicon PNGs and a multi-size favicon.ico from any image.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./qr.html">
+          <div class="title">qr code generator / decoder</div>
+          <div class="desc">Generate QR codes and read them from images.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./color.html">
+          <div class="title">color converter &amp; contrast checker</div>
+          <div class="desc">Convert HEX, RGB, HSL, HSV and OKLCH, and check WCAG contrast.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./css.html">
+          <div class="title">css generators</div>
+          <div class="desc">Generate clamp() sizes, gradients and box shadows with live previews.</div>
+        </a>
+      </li>
+      <li>
+        <a href="./svg.html">
+          <div class="title">svg viewer / optimizer</div>
+          <div class="desc">Preview SVG and strip comments, metadata, scripts and extra whitespace.</div>
         </a>
       </li>
       <li>
