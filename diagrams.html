@@ -1,0 +1,612 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>diagram renderer</title>
+  <meta name="description" content="Render Mermaid, Graphviz DOT, D2, Nomnoml, WaveDrom, Vega-Lite, Svgbob and Pikchr diagrams locally in your browser.">
+  <link rel="stylesheet" href="./style.css">
+  <style>
+    .diagram-grid { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); }
+    @media (max-width: 900px) { .diagram-grid { grid-template-columns: 1fr; } }
+    #source { min-height: 26em; }
+    .preview {
+      min-height: 28rem;
+      max-height: 72vh;
+      overflow: auto;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #fff;
+      padding: 1rem;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+    }
+    .preview svg { max-width: 100%; height: auto; }
+    .preview .hint { align-self: center; }
+    .diagram-actions { flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+  <main class="wide">
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>diagram renderer</h1>
+    <p class="subtitle">Render text-based diagrams locally. Eight engines, no server required.</p>
+
+    <div class="row" style="margin-top:0">
+      <label for="formatSel" style="margin:0">Format</label>
+      <select id="formatSel" aria-label="Diagram format">
+        <option value="mermaid" selected>Mermaid</option>
+        <option value="dot">Graphviz DOT</option>
+        <option value="d2">D2</option>
+        <option value="nomnoml">Nomnoml</option>
+        <option value="wavedrom">WaveDrom (WaveJSON)</option>
+        <option value="vega">Vega-Lite (JSON)</option>
+        <option value="svgbob">Svgbob (ASCII)</option>
+        <option value="pikchr">Pikchr</option>
+      </select>
+      <span class="spacer"></span>
+      <button id="exampleBtn" type="button" class="secondary">Load example</button>
+    </div>
+    <div class="hint" id="formatHint" style="margin-top:0.5rem"></div>
+
+    <div class="grid diagram-grid" style="margin-top:0.75rem">
+      <section class="card" style="margin-top:0">
+        <label for="source" style="margin-top:0">Source</label>
+        <textarea id="source" class="tall" spellcheck="false"></textarea>
+        <div class="opts">
+          <label><input type="checkbox" id="liveChk" checked> Render live</label>
+        </div>
+        <div class="row">
+          <button id="renderBtn" type="button">Render</button>
+          <button id="clearBtn" type="button" class="secondary">Clear</button>
+          <span class="spacer"></span>
+          <span class="hint">Ctrl/Cmd + Enter</span>
+        </div>
+      </section>
+
+      <section class="card" style="margin-top:0">
+        <div class="row" style="margin-top:0">
+          <h2 style="margin:0">Preview</h2>
+          <span class="spacer"></span>
+          <span id="statusBadge" class="badge muted">waiting</span>
+        </div>
+        <div class="hint" id="statusHint" style="margin-top:0.35rem"></div>
+        <div class="error" id="error" role="alert"></div>
+        <div class="row diagram-actions">
+          <button id="downloadSvgBtn" type="button" class="secondary" disabled>Download SVG</button>
+          <button id="downloadPngBtn" type="button" class="secondary" disabled>Download PNG</button>
+          <button id="copySvgBtn" type="button" class="secondary" disabled>Copy SVG</button>
+        </div>
+        <div class="preview" id="preview" style="margin-top:0.75rem">
+          <div class="hint" id="previewEmpty">Render a diagram to see it here.</div>
+        </div>
+      </section>
+    </div>
+
+    <footer>
+      Mermaid, Graphviz (Viz.js), D2, nomnoml, WaveDrom, Vega-Lite, Svgbob and Pikchr.
+      Libraries load from CDNs on first use; source text and rendered diagrams stay in your browser.
+      PlantUML is not included because it needs a server-side renderer.
+    </footer>
+  </main>
+
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var formatSel = document.getElementById("formatSel");
+    var source = document.getElementById("source");
+    var liveChk = document.getElementById("liveChk");
+    var formatHint = document.getElementById("formatHint");
+    var statusBadge = document.getElementById("statusBadge");
+    var statusHint = document.getElementById("statusHint");
+    var errorEl = document.getElementById("error");
+    var preview = document.getElementById("preview");
+    var previewEmpty = document.getElementById("previewEmpty");
+    var downloadSvgBtn = document.getElementById("downloadSvgBtn");
+    var downloadPngBtn = document.getElementById("downloadPngBtn");
+    var copySvgBtn = document.getElementById("copySvgBtn");
+
+    var FORMATS = {
+      mermaid: {
+        label: "Mermaid",
+        hint: "Flowcharts, sequence, class, state, ER, gantt, mindmap, gitGraph, timeline and more.",
+        example: "flowchart LR\n" +
+          "  Client[Client] --> API[API]\n" +
+          "  API --> DB[(Database)]\n" +
+          "  API --> Cache[Cache]\n" +
+          "  DB --> API"
+      },
+      dot: {
+        label: "Graphviz DOT",
+        hint: "Directed or undirected graphs using the DOT language.",
+        example: "digraph G {\n" +
+          "  rankdir=LR;\n" +
+          "  Client -> API;\n" +
+          "  API -> Database [label=\"SQL\"];\n" +
+          "  API -> Cache [label=\"read\"];\n" +
+          "  Database [shape=cylinder];\n" +
+          "}"
+      },
+      d2: {
+        label: "D2",
+        hint: "Declarative diagram scripting with containers, shapes and connections.",
+        example: "client: Client\n" +
+          "api: API\n" +
+          "db: Database { shape: cylinder }\n" +
+          "cache: Cache\n" +
+          "client -> api: request\n" +
+          "api -> db: SQL\n" +
+          "api -> cache: read"
+      },
+      nomnoml: {
+        label: "Nomnoml",
+        hint: "UML-style diagrams with a compact bracket syntax.",
+        example: "[Client] -> [API]\n" +
+          "[API] -> [Database]\n" +
+          "[API] -> [Cache]\n" +
+          "[<abstract>Shape|+ area(): number]\n" +
+          "[Circle] -> [Shape]"
+      },
+      wavedrom: {
+        label: "WaveDrom",
+        hint: "Digital timing diagrams described as WaveJSON.",
+        example: "{\n" +
+          "  \"signal\": [\n" +
+          "    { \"name\": \"clk\", \"wave\": \"p........\" },\n" +
+          "    { \"name\": \"req\", \"wave\": \"0.1..0...\" },\n" +
+          "    { \"name\": \"data\", \"wave\": \"x.34.5x..\", \"data\": [\"head\", \"body\", \"tail\"] }\n" +
+          "  ]\n" +
+          "}"
+      },
+      vega: {
+        label: "Vega-Lite",
+        hint: "Charts and visualizations from a JSON grammar. Vega specs also work.",
+        example: "{\n" +
+          "  \"$schema\": \"https://vega.github.io/schema/vega-lite/v5.json\",\n" +
+          "  \"data\": { \"values\": [\n" +
+          "    { \"category\": \"A\", \"value\": 28 },\n" +
+          "    { \"category\": \"B\", \"value\": 55 },\n" +
+          "    { \"category\": \"C\", \"value\": 43 }\n" +
+          "  ] },\n" +
+          "  \"mark\": \"bar\",\n" +
+          "  \"encoding\": {\n" +
+          "    \"x\": { \"field\": \"category\", \"type\": \"nominal\" },\n" +
+          "    \"y\": { \"field\": \"value\", \"type\": \"quantitative\" }\n" +
+          "  }\n" +
+          "}"
+      },
+      svgbob: {
+        label: "Svgbob",
+        hint: "Turn ASCII art diagrams into clean SVG paths.",
+        example: "   .--------.       .-------.\n" +
+          "   | Client | ----> |  API  |\n" +
+          "   '--------'       '-------'\n" +
+          "                         |\n" +
+          "                         v\n" +
+          "                    .----------.\n" +
+          "                    | Database |\n" +
+          "                    '----------'"
+      },
+      pikchr: {
+        label: "Pikchr",
+        hint: "PIC-like diagrams with boxes, arrows, circles and labels.",
+        example: "box \"Client\" fit\n" +
+          "arrow right\n" +
+          "box \"API\" fit\n" +
+          "arrow down\n" +
+          "box \"Database\" fit"
+      }
+    };
+
+    var scriptPromises = Object.create(null);
+    var mermaidPromise = null;
+    var nomnomlPromise = null;
+    var wavedromPromise = null;
+    var vizPromise = null;
+    var d2Promise = null;
+    var vegaPromise = null;
+    var bobPromise = null;
+    var pikchrPromise = null;
+    var previousFormat = "mermaid";
+    var lastSvg = "";
+    var lastFormat = "mermaid";
+    var renderSeq = 0;
+    var renderTimer = null;
+
+    function loadScript(url, globalName) {
+      if (window[globalName]) return Promise.resolve(window[globalName]);
+      if (!scriptPromises[url]) {
+        scriptPromises[url] = new Promise(function (resolve, reject) {
+          var script = document.createElement("script");
+          script.src = url;
+          script.async = true;
+          script.onload = function () {
+            if (window[globalName]) resolve(window[globalName]);
+            else reject(new Error("Loaded " + url + " but " + globalName + " is missing."));
+          };
+          script.onerror = function () { reject(new Error("Could not load " + url)); };
+          document.head.appendChild(script);
+        }).catch(function (e) {
+          delete scriptPromises[url];
+          throw e;
+        });
+      }
+      return scriptPromises[url];
+    }
+
+    function getMermaid() {
+      if (!mermaidPromise) {
+        mermaidPromise = loadScript("https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.min.js", "mermaid").then(function (mermaid) {
+          mermaid.initialize({
+            startOnLoad: false,
+            securityLevel: "strict",
+            theme: "default",
+            htmlLabels: false,
+            fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+          });
+          return mermaid;
+        }).catch(function (e) {
+          mermaidPromise = null;
+          throw e;
+        });
+      }
+      return mermaidPromise;
+    }
+
+    function getNomnoml() {
+      if (!nomnomlPromise) {
+        nomnomlPromise = loadScript("https://cdn.jsdelivr.net/npm/graphre@0.1.2/dist/graphre.js", "graphre")
+          .then(function () {
+            return loadScript("https://cdn.jsdelivr.net/npm/nomnoml@1.7.0/dist/nomnoml.js", "nomnoml");
+          }).catch(function (e) {
+            nomnomlPromise = null;
+            throw e;
+          });
+      }
+      return nomnomlPromise;
+    }
+
+    function getWaveDrom() {
+      if (!wavedromPromise) {
+        wavedromPromise = loadScript("https://cdn.jsdelivr.net/npm/wavedrom@3.8.0/wavedrom.min.js", "WaveDrom")
+          .then(function () {
+            return loadScript("https://cdn.jsdelivr.net/npm/wavedrom@3.8.0/skins/default.js", "WaveSkin");
+          }).then(function () {
+            return window.WaveDrom;
+          }).catch(function (e) {
+            wavedromPromise = null;
+            throw e;
+          });
+      }
+      return wavedromPromise;
+    }
+
+    function getViz() {
+      if (!vizPromise) {
+        vizPromise = import("https://esm.sh/@viz-js/viz@3.31.0").then(function (module) {
+          return module.instance();
+        }).catch(function (e) {
+          vizPromise = null;
+          throw new Error("Could not load Graphviz: " + (e && e.message ? e.message : String(e)));
+        });
+      }
+      return vizPromise;
+    }
+
+    function getD2() {
+      if (!d2Promise) {
+        d2Promise = import("https://esm.sh/@terrastruct/d2@0.1.33").then(function (module) {
+          return new module.D2();
+        }).catch(function (e) {
+          d2Promise = null;
+          throw new Error("Could not load D2: " + (e && e.message ? e.message : String(e)));
+        });
+      }
+      return d2Promise;
+    }
+
+    function getVega() {
+      if (!vegaPromise) {
+        vegaPromise = import("https://esm.sh/vega-embed@7.3.0").then(function (module) {
+          return module.default;
+        }).catch(function (e) {
+          vegaPromise = null;
+          throw new Error("Could not load Vega-Lite: " + (e && e.message ? e.message : String(e)));
+        });
+      }
+      return vegaPromise;
+    }
+
+    function getBob() {
+      if (!bobPromise) {
+        bobPromise = import("https://esm.sh/bob-wasm@1.0.1").then(function (module) {
+          return module.default;
+        }).then(function (bob) {
+          return bob.loadWASM().then(function () { return bob; });
+        }).catch(function (e) {
+          bobPromise = null;
+          throw new Error("Could not load Svgbob: " + (e && e.message ? e.message : String(e)));
+        });
+      }
+      return bobPromise;
+    }
+
+    function getPikchr() {
+      if (!pikchrPromise) {
+        pikchrPromise = import("https://esm.sh/pikchr-wasm@2.0.1").then(function (module) {
+          return module.default;
+        }).then(function (pikchr) {
+          return pikchr.loadWASM().then(function () { return pikchr; });
+        }).catch(function (e) {
+          pikchrPromise = null;
+          throw new Error("Could not load Pikchr: " + (e && e.message ? e.message : String(e)));
+        });
+      }
+      return pikchrPromise;
+    }
+
+    function sanitizeSvg(svg) {
+      try {
+        var documentNode = new DOMParser().parseFromString(svg, "image/svg+xml");
+        var root = documentNode.documentElement;
+        if (!root || documentNode.querySelector("parsererror")) return svg;
+
+        var bad = root.querySelectorAll("script, iframe, object, embed");
+        Array.prototype.forEach.call(bad, function (node) { node.remove(); });
+
+        var elements = [root].concat(Array.prototype.slice.call(root.querySelectorAll("*")));
+        elements.forEach(function (element) {
+          if (!element.attributes) return;
+          Array.prototype.slice.call(element.attributes).forEach(function (attribute) {
+            if (/^on/i.test(attribute.name)) element.removeAttribute(attribute.name);
+            if (/^(href|xlink:href)$/i.test(attribute.name) &&
+                /^\s*(javascript:|data:text\/html)/i.test(attribute.value)) {
+              element.removeAttribute(attribute.name);
+            }
+          });
+        });
+        return new XMLSerializer().serializeToString(root);
+      } catch (e) {
+        return svg;
+      }
+    }
+
+    async function renderMermaid(text, seq) {
+      var mermaid = await getMermaid();
+      var id = "diagram-" + seq;
+      var result = await mermaid.render(id, text);
+      var leftover = document.getElementById(id);
+      if (leftover) leftover.remove();
+      try {
+        var documentNode = new DOMParser().parseFromString(result.svg, "image/svg+xml");
+        var root = documentNode.documentElement;
+        if (root && !documentNode.querySelector("parsererror")) {
+          Array.prototype.forEach.call(root.querySelectorAll("foreignObject"), function (node) {
+            if (!node.textContent.trim()) node.remove();
+          });
+          return new XMLSerializer().serializeToString(root);
+        }
+      } catch (e) { /* keep the original SVG */ }
+      return result.svg;
+    }
+
+    async function renderDot(text) {
+      var viz = await getViz();
+      return viz.renderString(text, { format: "svg" });
+    }
+
+    async function renderD2(text) {
+      var d2 = await getD2();
+      var compiled = await d2.compile(text);
+      return d2.render(compiled.diagram, compiled.renderOptions);
+    }
+
+    async function renderNomnoml(text) {
+      var nomnoml = await getNomnoml();
+      return nomnoml.renderSvg(text);
+    }
+
+    async function renderWaveDrom(text, seq) {
+      var WaveDrom = await getWaveDrom();
+      var data = JSON.parse(text);
+      var prefix = "wavedrom-stage-" + seq;
+      var stage = document.createElement("div");
+      stage.id = prefix + "0";
+      stage.style.position = "fixed";
+      stage.style.left = "-100000px";
+      stage.style.top = "0";
+      document.body.appendChild(stage);
+      try {
+        WaveDrom.RenderWaveForm(0, data, prefix);
+        var svg = stage.querySelector("svg");
+        if (!svg) throw new Error("WaveDrom did not produce an SVG.");
+        return svg.outerHTML;
+      } finally {
+        stage.remove();
+      }
+    }
+
+    async function renderVega(text) {
+      var embed = await getVega();
+      var spec = JSON.parse(text);
+      var stage = document.createElement("div");
+      stage.style.position = "fixed";
+      stage.style.left = "-100000px";
+      stage.style.top = "0";
+      document.body.appendChild(stage);
+      var result;
+      try {
+        result = await embed(stage, spec, { actions: false, renderer: "svg" });
+        return await result.view.toSVG();
+      } finally {
+        if (result && result.view) result.view.finalize();
+        stage.remove();
+      }
+    }
+
+    async function renderSvgbob(text) {
+      var bob = await getBob();
+      return bob.render(text);
+    }
+
+    async function renderPikchr(text) {
+      var pikchr = await getPikchr();
+      return pikchr.render(text);
+    }
+
+    async function renderFormat(format, text, seq) {
+      if (format === "mermaid") return renderMermaid(text, seq);
+      if (format === "dot") return renderDot(text);
+      if (format === "d2") return renderD2(text);
+      if (format === "nomnoml") return renderNomnoml(text);
+      if (format === "wavedrom") return renderWaveDrom(text, seq);
+      if (format === "vega") return renderVega(text);
+      if (format === "svgbob") return renderSvgbob(text);
+      if (format === "pikchr") return renderPikchr(text);
+      throw new Error("Unknown format.");
+    }
+
+    function setStatus(kind, label, hint) {
+      statusBadge.className = "badge " + kind;
+      statusBadge.textContent = label;
+      statusHint.textContent = hint || "";
+    }
+
+    function setActions(enabled) {
+      downloadSvgBtn.disabled = !enabled;
+      downloadPngBtn.disabled = !enabled;
+      copySvgBtn.disabled = !enabled;
+    }
+
+    function clearPreview() {
+      preview.innerHTML = "";
+      previewEmpty.classList.remove("hidden");
+      previewEmpty.textContent = "Render a diagram to see it here.";
+      lastSvg = "";
+      setActions(false);
+    }
+
+    async function render() {
+      var seq = ++renderSeq;
+      errorEl.textContent = "";
+      if (!source.value.trim()) {
+        clearPreview();
+        setStatus("muted", "waiting", FORMATS[formatSel.value].label);
+        return;
+      }
+
+      var format = formatSel.value;
+      setStatus("muted", "rendering…", FORMATS[format].label + " · loading engine if needed");
+      lastSvg = "";
+      setActions(false);
+      var started = performance.now();
+
+      try {
+        var svg = await renderFormat(format, source.value, seq);
+        if (seq !== renderSeq) return;
+        if (!svg || typeof svg !== "string") throw new Error("The renderer returned no SVG.");
+        svg = sanitizeSvg(svg);
+        lastSvg = svg;
+        lastFormat = format;
+        preview.innerHTML = svg;
+        previewEmpty.classList.add("hidden");
+        setActions(true);
+        setStatus("ok", "rendered", FORMATS[format].label + " · " +
+          Math.round(performance.now() - started) + " ms · " + Toolkit.formatBytes(svg.length));
+      } catch (e) {
+        if (seq !== renderSeq) return;
+        clearPreview();
+        setStatus("bad", "render failed", FORMATS[format].label);
+        errorEl.textContent = e && e.message ? e.message : String(e);
+      }
+    }
+
+    function schedule() {
+      clearTimeout(renderTimer);
+      renderTimer = setTimeout(render, 600);
+    }
+
+    function setFormat(format, loadExample) {
+      previousFormat = format;
+      formatHint.textContent = FORMATS[format].hint;
+      if (loadExample) source.value = FORMATS[format].example;
+    }
+
+    function downloadPng() {
+      if (!lastSvg) return;
+      var blob = new Blob([lastSvg], { type: "image/svg+xml" });
+      var url = URL.createObjectURL(blob);
+      var image = new Image();
+      image.onload = function () {
+        var width = image.naturalWidth || 1200;
+        var height = image.naturalHeight || 800;
+        var scale = Math.min(2, 2400 / Math.max(width, height));
+        if (scale < 1) scale = 1;
+        var canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(width * scale));
+        canvas.height = Math.max(1, Math.round(height * scale));
+        var ctx = canvas.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+        try {
+          canvas.toBlob(function (png) {
+            if (png) Toolkit.download(png, lastFormat + ".png");
+            else errorEl.textContent = "PNG export failed; use Download SVG instead.";
+            URL.revokeObjectURL(url);
+          }, "image/png");
+        } catch (e) {
+          URL.revokeObjectURL(url);
+          errorEl.textContent = "PNG export failed: " + (e && e.message ? e.message : String(e)) + ". Use Download SVG instead.";
+        }
+      };
+      image.onerror = function () {
+        URL.revokeObjectURL(url);
+        errorEl.textContent = "Could not rasterize that SVG.";
+      };
+      image.src = url;
+    }
+
+    formatSel.addEventListener("change", function () {
+      var next = formatSel.value;
+      var wasExample = !source.value.trim() || source.value === FORMATS[previousFormat].example;
+      setFormat(next, wasExample);
+      render();
+    });
+    document.getElementById("exampleBtn").addEventListener("click", function () {
+      source.value = FORMATS[formatSel.value].example;
+      setFormat(formatSel.value, false);
+      render();
+    });
+    document.getElementById("renderBtn").addEventListener("click", render);
+    document.getElementById("clearBtn").addEventListener("click", function () {
+      source.value = "";
+      errorEl.textContent = "";
+      clearPreview();
+      setStatus("muted", "waiting", FORMATS[formatSel.value].label);
+      source.focus();
+    });
+    document.getElementById("copySvgBtn").addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(lastSvg).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    document.getElementById("downloadSvgBtn").addEventListener("click", function () {
+      if (!lastSvg) return;
+      Toolkit.download(new Blob([lastSvg], { type: "image/svg+xml" }), lastFormat + ".svg");
+    });
+    downloadPngBtn.addEventListener("click", downloadPng);
+    source.addEventListener("input", function () { if (liveChk.checked) schedule(); });
+    document.addEventListener("keydown", function (e) {
+      if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+        e.preventDefault();
+        render();
+      }
+    });
+
+    setFormat("mermaid", true);
+    setStatus("muted", "rendering…", "Mermaid");
+    render();
+  </script>
+</body>
+</html>

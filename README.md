@@ -42,6 +42,7 @@ Simple static web tools that each do one thing. Everything runs locally in your 
 
 | Tool | What it does |
 | --- | --- |
+| [diagram renderer](https://jorisvddonk.github.io/web-tools/diagrams.html) | Render Mermaid, Graphviz DOT, D2, Nomnoml, WaveDrom, Vega-Lite, Svgbob and Pikchr diagrams locally, with SVG/PNG export. |
 | [image resizer / converter](https://jorisvddonk.github.io/web-tools/image.html) | Resize, compress and convert images to JPEG, PNG, WebP or AVIF with quality and background controls. |
 | [favicon generator](https://jorisvddonk.github.io/web-tools/favicon.html) | Generate favicon PNGs at common sizes plus a multi-size `favicon.ico`, with an HTML snippet. |
 | [qr code generator / decoder](https://jorisvddonk.github.io/web-tools/qr.html) | Generate styled QR codes and decode QR images, including pasted screenshots. |
@@ -51,9 +52,11 @@ Simple static web tools that each do one thing. Everything runs locally in your 
 | [palette](https://jorisvddonk.github.io/web-tools/palette.html) | Drop in an image to extract its palette, ordered along a z-order curve. Copy hex/RGBA lists or download a palette PNG. |
 | [rgba_extractor](https://jorisvddonk.github.io/web-tools/rgba_extractor.html) | Drop in an image to extract pixels as a flat RGBA array, an array of tuples or JSON with width/height. |
 
+The diagram renderer intentionally omits PlantUML because it requires a server-side renderer.
+
 The schema tester uses Ajv for draft-06/07/2019-09/2020-12 and [`@cfworker/json-schema`](https://github.com/cfworker/cfworker/tree/main/packages/json-schema) for draft-04. Draft-06 schemas are evaluated with Ajv's draft-07 engine, which shares the same semantics for keywords common to both drafts. Remote `$ref`s are not fetched.
 
-Some tools load libraries from a CDN: js-yaml, JSONPath Plus, qrcode, jsQR and Ajv. All processing still happens in the browser.
+Some tools load libraries from a CDN: js-yaml, JSONPath Plus, qrcode, jsQR, Ajv, Mermaid, Viz.js, D2, nomnoml, WaveDrom, Vega-Lite, Svgbob and Pikchr. All processing still happens in the browser.
 
 ## Development
 
