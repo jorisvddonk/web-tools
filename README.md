@@ -48,8 +48,8 @@ Simple static web tools that each do one thing. Everything runs locally in your 
 | [color converter & contrast checker](https://jorisvddonk.github.io/web-tools/color.html) | Convert HEX/RGB/HSL/HSV/OKLCH and check WCAG AA/AAA contrast for text. |
 | [css generators](https://jorisvddonk.github.io/web-tools/css.html) | Generate `clamp()` sizes, gradients and box shadows with live previews. |
 | [svg viewer / optimizer](https://jorisvddonk.github.io/web-tools/svg.html) | Preview SVG and strip comments, metadata, scripts, event handlers and extra whitespace. |
-| [palette](https://jorisvddonk.github.io/web-tools/palette.html) | Drop in an image to extract its color palette, ordered along a z-order curve. |
-| [rgba_extractor](https://jorisvddonk.github.io/web-tools/rgba_extractor.html) | Drop in an image to extract its pixels as a simple RGBA array. |
+| [palette](https://jorisvddonk.github.io/web-tools/palette.html) | Drop in an image to extract its palette, ordered along a z-order curve. Copy hex/RGBA lists or download a palette PNG. |
+| [rgba_extractor](https://jorisvddonk.github.io/web-tools/rgba_extractor.html) | Drop in an image to extract pixels as a flat RGBA array, an array of tuples or JSON with width/height. |
 
 The schema tester uses Ajv for draft-06/07/2019-09/2020-12 and [`@cfworker/json-schema`](https://github.com/cfworker/cfworker/tree/main/packages/json-schema) for draft-04. Draft-06 schemas are evaluated with Ajv's draft-07 engine, which shares the same semantics for keywords common to both drafts. Remote `$ref`s are not fetched.
 

@@ -1,89 +1,258 @@
-<html>
-
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>rgba extractor</title>
+  <meta name="description" content="Drop in an image to extract its pixels as a flat RGBA array, tuples or JSON. Runs in your browser.">
+  <link rel="stylesheet" href="./style.css">
   <style>
-    #drop {
-      width: 100%;
-      height: 50%;
-      background-color: aquamarine;
-    }
-
-    #drop p {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      font-size: 5em;
-    }
-
-    #results {
-      width: 100%;
-      height: 50%;
-      background-color: bisque;
-    }
-
-    canvas {
-      image-rendering: pixelated;
-      image-rendering: -moz-crisp-edges;
-      image-rendering: crisp-edges;
-    }
-
-    textarea {
-      width: 40em;
-      height: 20em;
-    }
+    .drop-zone { border: 2px dashed var(--border); border-radius: 10px; padding: 1.5rem; text-align: center; cursor: pointer; background: #fff; }
+    .drop-zone.dragging { border-color: var(--accent); background: #faf8ff; }
+    .source-preview { text-align: center; min-height: 8rem; }
+    .source-preview img { max-width: 100%; max-height: 20rem; min-width: 6rem; border-radius: 6px; image-rendering: pixelated; }
   </style>
-  <script>
-    function handleDrop(event) {
-      event.preventDefault();
-
-      if (event.dataTransfer.items) {
-        for (let i = 0; i < event.dataTransfer.items.length; i++) {
-          if (event.dataTransfer.items[i].kind === 'file') {
-            const file = event.dataTransfer.items[i].getAsFile();
-            const canvas = document.getElementById("canvas");
-            const ctx = canvas.getContext('2d');
-            createImageBitmap(file).then(v => {
-              ctx.drawImage(v, 0, 0);
-              const data = ctx.getImageData(0, 0, v.width, v.height);
-              document.getElementById("width").textContent = v.width;
-              document.getElementById("height").textContent = v.height;
-              const result = document.getElementById("result");
-              result.textContent += "[";
-              for (let i = 0; i < data.data.length; i += 4) {
-                const r = data.data[i];
-                const g = data.data[i + 1];
-                const b = data.data[i + 2];
-                const a = data.data[i + 3];
-                const last = i + 4 < data.data.length;
-                result.textContent += `${r}, ${g}, ${b}, ${a}${last ? ',  ' : ''}`;
-              }
-              result.textContent += "]";
-            });
-          }
-        }
-      };
-    };
-
-    function handleDragOver(event) {
-      event.preventDefault();
-    };
-
-    function copy_to_clip() {
-      navigator.clipboard.writeText(document.getElementById("result").textContent);
-    }
-  </script>
 </head>
-
 <body>
-  <div id="drop" ondrop="handleDrop(event)" ondragover="handleDragOver(event)">
-    <p>Drop a file here!</p>
-    <canvas id="canvas"></canvas>
-  </div>
-  <div id="results">
-    <button id="copy to clipboard" onclick="copy_to_clip()">Copy to clipboard</button>
-    <div>Width in px: <span id="width">n/a</span></div>
-    <div>Height in px: <span id="height">n/a</span></div>
-    <textarea id="result"></textarea>
-  </div>
-</body>
+  <main class="wide">
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>rgba extractor</h1>
+    <p class="subtitle">Drop in an image to extract its pixels as RGBA values. Everything runs locally.</p>
 
+    <div id="dropZone" class="drop-zone" role="button" tabindex="0">
+      <strong>Drop an image here</strong> or click to choose a file
+      <div class="hint" style="margin-top:0.25rem">PNG, JPEG, WebP, GIF (first frame), AVIF or SVG</div>
+      <input type="file" id="fileInput" accept="image/*" class="hidden">
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="statusBadge" class="badge muted">waiting for image</span>
+      <span id="statusHint" class="hint"></span>
+      <span class="spacer"></span>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+
+    <div class="grid">
+      <section class="card" style="margin-top:0">
+        <h2>Source</h2>
+        <div class="source-preview">
+          <img id="preview" class="hidden" alt="Source image preview">
+          <div class="hint" id="sourceInfo">No image loaded.</div>
+        </div>
+      </section>
+
+      <section class="card" style="margin-top:0">
+        <div class="row" style="margin-top:0">
+          <h2 style="margin:0">Output format</h2>
+          <span class="spacer"></span>
+          <select id="formatSel" aria-label="Output format">
+            <option value="flat" selected>Flat RGBA array</option>
+            <option value="tuples">Array of [r, g, b, a] tuples</option>
+            <option value="json">JSON with width and height</option>
+          </select>
+        </div>
+        <div class="hint" style="margin-top:0.5rem">
+          Flat output is <span class="mono">[r, g, b, a, r, g, b, a, …]</span>, one pixel at a time in row-major order.
+        </div>
+        <div class="row" style="margin-top:0.75rem">
+          <button id="copyBtn" type="button" class="secondary" disabled>Copy output</button>
+          <button id="downloadBtn" type="button" class="secondary" disabled>Download</button>
+        </div>
+      </section>
+    </div>
+
+    <label for="output">Pixels</label>
+    <textarea id="output" class="tall" readonly spellcheck="false" placeholder="Drop an image to extract its RGBA data…"></textarea>
+    <div class="stats" id="stats"></div>
+
+    <footer>
+      Pixel data comes from the browser canvas in sRGB. Transparent pixels keep their alpha channel.
+    </footer>
+  </main>
+
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var dropZone = document.getElementById("dropZone");
+    var fileInput = document.getElementById("fileInput");
+    var preview = document.getElementById("preview");
+    var sourceInfo = document.getElementById("sourceInfo");
+    var statusBadge = document.getElementById("statusBadge");
+    var statusHint = document.getElementById("statusHint");
+    var errorEl = document.getElementById("error");
+    var formatSel = document.getElementById("formatSel");
+    var output = document.getElementById("output");
+    var stats = document.getElementById("stats");
+    var copyBtn = document.getElementById("copyBtn");
+    var downloadBtn = document.getElementById("downloadBtn");
+
+    var pixels = null;
+    var imageWidth = 0;
+    var imageHeight = 0;
+    var sourceUrl = null;
+    var fileName = "";
+
+    function setStatus(kind, label, hint) {
+      statusBadge.className = "badge " + kind;
+      statusBadge.textContent = label;
+      statusHint.textContent = hint || "";
+    }
+
+    function flatValue() {
+      var parts = new Array(pixels.length / 4);
+      for (var i = 0, p = 0; i < pixels.length; i += 4) {
+        parts[p++] = pixels[i] + ", " + pixels[i + 1] + ", " + pixels[i + 2] + ", " + pixels[i + 3];
+      }
+      return "[" + parts.join(", ") + "]";
+    }
+
+    function tupleValue() {
+      var parts = new Array(pixels.length / 4);
+      for (var i = 0, p = 0; i < pixels.length; i += 4) {
+        parts[p++] = "[" + pixels[i] + ", " + pixels[i + 1] + ", " + pixels[i + 2] + ", " + pixels[i + 3] + "]";
+      }
+      return "[" + parts.join(", ") + "]";
+    }
+
+    function jsonValue() {
+      return JSON.stringify({
+        width: imageWidth,
+        height: imageHeight,
+        data: Array.from(pixels)
+      });
+    }
+
+    function render() {
+      if (!pixels) {
+        output.value = "";
+        stats.textContent = "";
+        copyBtn.disabled = true;
+        downloadBtn.disabled = true;
+        return;
+      }
+      var value;
+      if (formatSel.value === "tuples") value = tupleValue();
+      else if (formatSel.value === "json") value = jsonValue();
+      else value = flatValue();
+      output.value = value;
+      stats.textContent = imageWidth + " × " + imageHeight + " px · " + (pixels.length / 4).toLocaleString() +
+        " pixels · " + pixels.length.toLocaleString() + " channel values · " + Toolkit.formatBytes(value.length);
+      copyBtn.disabled = false;
+      downloadBtn.disabled = false;
+    }
+
+    function readPixels(bitmap, file) {
+      var canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      var ctx = canvas.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(bitmap, 0, 0);
+      var imageData;
+      try {
+        imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      } catch (e) {
+        errorEl.textContent = "Could not read pixels from that image.";
+        setStatus("bad", "error", "");
+        return;
+      }
+      pixels = imageData.data;
+      imageWidth = canvas.width;
+      imageHeight = canvas.height;
+      render();
+      setStatus("ok", "extracted", imageWidth + " × " + imageHeight + " px · " +
+        (pixels.length / 4).toLocaleString() + " pixels" + (fileName ? " · " + fileName : ""));
+      errorEl.textContent = "";
+    }
+
+    function loadAsImage(file) {
+      return new Promise(function (resolve, reject) {
+        var image = new Image();
+        var url = URL.createObjectURL(file);
+        image.onload = function () { URL.revokeObjectURL(url); resolve(image); };
+        image.onerror = function () { URL.revokeObjectURL(url); reject(new Error("Could not decode that image.")); };
+        image.src = url;
+      });
+    }
+
+    async function loadFile(file) {
+      if (!file) return;
+      if (!/^image\//.test(file.type)) {
+        errorEl.textContent = "That file is not an image.";
+        setStatus("bad", "error", "");
+        return;
+      }
+      errorEl.textContent = "";
+      try {
+        var bitmap;
+        if (typeof createImageBitmap === "function") {
+          try {
+            bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+          } catch (e) {
+            bitmap = await loadAsImage(file);
+          }
+        } else {
+          bitmap = await loadAsImage(file);
+        }
+        if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+        sourceUrl = URL.createObjectURL(file);
+        preview.src = sourceUrl;
+        preview.classList.remove("hidden");
+        fileName = file.name || "image";
+        sourceInfo.textContent = bitmap.width + " × " + bitmap.height + " px · " +
+          (file.type || "image") + " · " + Toolkit.formatBytes(file.size);
+        readPixels(bitmap, file);
+      } catch (e) {
+        errorEl.textContent = e && e.message ? e.message : String(e);
+        setStatus("bad", "error", "");
+      }
+    }
+
+    function clearAll() {
+      if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+      sourceUrl = null;
+      pixels = null;
+      imageWidth = 0;
+      imageHeight = 0;
+      fileName = "";
+      fileInput.value = "";
+      preview.classList.add("hidden");
+      preview.removeAttribute("src");
+      sourceInfo.textContent = "No image loaded.";
+      output.value = "";
+      stats.textContent = "";
+      copyBtn.disabled = true;
+      downloadBtn.disabled = true;
+      errorEl.textContent = "";
+      setStatus("muted", "waiting for image", "");
+    }
+
+    dropZone.addEventListener("click", function () { fileInput.click(); });
+    dropZone.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInput.click(); }
+    });
+    dropZone.addEventListener("dragover", function (e) { e.preventDefault(); dropZone.classList.add("dragging"); });
+    dropZone.addEventListener("dragleave", function () { dropZone.classList.remove("dragging"); });
+    dropZone.addEventListener("drop", function (e) {
+      e.preventDefault();
+      dropZone.classList.remove("dragging");
+      loadFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener("change", function () { loadFile(fileInput.files[0]); });
+
+    formatSel.addEventListener("change", render);
+    copyBtn.addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(output.value).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    downloadBtn.addEventListener("click", function () {
+      if (!output.value) return;
+      var isJson = formatSel.value === "json";
+      Toolkit.download(new Blob([output.value], { type: isJson ? "application/json" : "text/plain" }), "pixels." + (isJson ? "json" : "txt"));
+    });
+    document.getElementById("clearBtn").addEventListener("click", clearAll);
+
+    clearAll();
+  </script>
+</body>
 </html>

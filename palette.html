@@ -1,123 +1,340 @@
-<html>
-
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/lodash.js/4.17.21/lodash.min.js"></script>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>image palette</title>
+  <meta name="description" content="Drop in an image to extract its color palette, ordered along a z-order curve. Copy hex/RGB lists or download a palette PNG.">
+  <link rel="stylesheet" href="./style.css">
   <style>
-    #drop {
-      width: 100%;
-      height: 50%;
-      background-color: aquamarine;
+    .drop-zone { border: 2px dashed var(--border); border-radius: 10px; padding: 1.5rem; text-align: center; cursor: pointer; background: #fff; }
+    .drop-zone.dragging { border-color: var(--accent); background: #faf8ff; }
+    .source-preview { text-align: center; min-height: 8rem; }
+    .source-preview img { max-width: 100%; max-height: 20rem; min-width: 6rem; border-radius: 6px; image-rendering: pixelated; }
+    .palette-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(5.2rem, 1fr));
+      gap: 0.5rem;
+      max-height: 30rem;
+      overflow: auto;
+      padding-right: 0.25rem;
     }
-
-    #drop p {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      font-size: 5em;
-    }
-
-    #results {
-      width: 100%;
-      height: 50%;
-      background-color: bisque;
-    }
-
-    canvas {
-      image-rendering: pixelated;
-      image-rendering: -moz-crisp-edges;
-      image-rendering: crisp-edges;
-    }
+    .swatch { border: 1px solid var(--border); border-radius: 6px; overflow: hidden; background: repeating-conic-gradient(#eee 0 25%, #fff 0 50%) 0 0 / 10px 10px; }
+    .swatch .color { height: 3.1rem; }
+    .swatch .label { background: #fff; color: var(--muted); font-family: var(--mono); font-size: 0.68rem; padding: 0.22rem 0.25rem; text-align: center; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
   </style>
-  <script>
-    function handleDrop(event) {
-      event.preventDefault();
-
-      let interleave1 = x => {
-        x = (x | (x << 16)) & 0x030000FF;
-        x = (x | (x <<  8)) & 0x0300F00F;
-        x = (x | (x <<  4)) & 0x030C30C3;
-        x = (x | (x <<  2)) & 0x09249249;
-        return x;
-      };
-
-      if (event.dataTransfer.items) {
-        for (let i = 0; i < event.dataTransfer.items.length; i++) {
-          if (event.dataTransfer.items[i].kind === 'file') {
-            const file = event.dataTransfer.items[i].getAsFile();
-            //const canvas = document.createElement("canvas");
-            const canvas = document.getElementById("canvas");
-            const results = document.getElementById("results");
-            const ctx = canvas.getContext('2d');
-            createImageBitmap(file).then(v => {
-              ctx.drawImage(v, 0, 0);
-              const data = ctx.getImageData(0, 0, v.width, v.height);
-              const set = new Set();
-              for (let i = 0; i < data.data.length; i += 4) {
-                const r = data.data[i];
-                const g = data.data[i + 1];
-                const b = data.data[i + 2];
-                const a = data.data[i + 3];
-                const z = (a << 0) + (b << 8) + (g << 16) + (r << 24);
-                set.add(z);
-              }
-
-              const canvas2 = document.createElement("canvas");
-              canvas2.width = set.size;
-              canvas2.height = 1;
-              canvas2.style.transform = "scale(20, 20)";
-              canvas2.style.transformOrigin = "top left";
-              const ctx2 = canvas2.getContext("2d");
-              console.log("----");
-
-              // convert our Set to an array of numbers. Not strictly needed but makes stuff further down a little easier
-              let values = [];
-              for (let e of set.entries()) {
-                values.push(e[0]); // entries() returns [value, value]
-              }
-
-              // Sort the array via a z-order curve, by interleaving the bits. Similar to https://www.forceflow.be/2013/10/07/morton-encodingdecoding-through-bit-interleaving-implementations/
-              // see also interleave1() function above
-              // we ignore the alpha channel as it's often the same anways :shrug:
-              values = _.sortBy(values, [(z) => {
-                const r = interleave1((z >> 24) & 0xFF);
-                const g = interleave1((z >> 16) & 0xFF);
-                const b = interleave1((z >> 8) & 0xFF);
-
-                return r | (g << 1) | (b << 2);
-              }]);
-
-              // Generate our output palette canvas!
-              let i = 0;
-              values.forEach(z => {
-                const r = (z >> 24) & 0xFF;
-                const g = (z >> 16) & 0xFF;
-                const b = (z >> 8) & 0xFF;
-                const a = (z >> 0) & 0xFF;
-                const rgba = `rgba(${r},${g},${b},${a / 255})`;
-                console.log(rgba);
-                ctx2.fillStyle = rgba;
-                ctx2.fillRect(i, 0, 1, 1);
-                i += 1;
-              });
-
-              // Add the palette canvas to the DOM to allow rightclick -> save as
-              results.appendChild(canvas2);
-            });
-          }
-        }
-      };
-    };
-
-    function handleDragOver(event) {
-      event.preventDefault();
-    };
-  </script>
 </head>
-
 <body>
-  <div id="drop" ondrop="handleDrop(event)" ondragover="handleDragOver(event)">
-    <p>Drop a file here!</p>
-    <canvas id="canvas"></canvas>
-  </div>
-  <div id="results"></div>
-</body>
+  <main class="wide">
+    <a class="back" href="./index.html">&larr; all tools</a>
+    <h1>image palette</h1>
+    <p class="subtitle">Drop in an image to extract its unique colors, ordered along a z-order curve. Everything runs locally.</p>
 
+    <div id="dropZone" class="drop-zone" role="button" tabindex="0">
+      <strong>Drop an image here</strong> or click to choose a file
+      <div class="hint" style="margin-top:0.25rem">PNG, JPEG, WebP, GIF (first frame), AVIF or SVG</div>
+      <input type="file" id="fileInput" accept="image/*" class="hidden">
+    </div>
+
+    <div class="row" style="margin-top:0.75rem">
+      <span id="statusBadge" class="badge muted">waiting for image</span>
+      <span id="statusHint" class="hint"></span>
+      <span class="spacer"></span>
+      <button id="clearBtn" type="button" class="secondary">Clear</button>
+    </div>
+    <div class="error" id="error" role="alert"></div>
+
+    <div class="grid">
+      <section class="card" style="margin-top:0">
+        <h2>Source</h2>
+        <div class="source-preview">
+          <img id="preview" class="hidden" alt="Source image preview">
+          <div class="hint" id="sourceInfo">No image loaded.</div>
+        </div>
+      </section>
+
+      <section class="card" style="margin-top:0">
+        <div class="row" style="margin-top:0">
+          <h2 style="margin:0">Palette</h2>
+          <span class="spacer"></span>
+          <span id="countBadge" class="badge muted">0 colors</span>
+        </div>
+        <div class="palette-grid" id="swatches" style="margin-top:0.75rem"></div>
+        <div class="hint" id="emptyHint" style="margin-top:0.75rem">Drop an image to see its palette.</div>
+        <div class="hint" id="truncHint" style="margin-top:0.5rem"></div>
+      </section>
+    </div>
+
+    <div class="row">
+      <button id="downloadBtn" type="button" disabled>Download palette PNG</button>
+      <button id="copyHexBtn" type="button" class="secondary" disabled>Copy hex list</button>
+      <button id="copyRgbBtn" type="button" class="secondary" disabled>Copy rgba list</button>
+    </div>
+
+    <canvas id="paletteCanvas" class="hidden"></canvas>
+
+    <footer>
+      Colors are sorted by interleaving the red, green and blue bits (a Morton/z-order curve).
+      Transparency is preserved in the swatches and exported image.
+    </footer>
+  </main>
+
+  <script src="./toolkit.js"></script>
+  <script>
+    "use strict";
+    var dropZone = document.getElementById("dropZone");
+    var fileInput = document.getElementById("fileInput");
+    var preview = document.getElementById("preview");
+    var sourceInfo = document.getElementById("sourceInfo");
+    var statusBadge = document.getElementById("statusBadge");
+    var statusHint = document.getElementById("statusHint");
+    var errorEl = document.getElementById("error");
+    var swatchesEl = document.getElementById("swatches");
+    var countBadge = document.getElementById("countBadge");
+    var emptyHint = document.getElementById("emptyHint");
+    var truncHint = document.getElementById("truncHint");
+    var downloadBtn = document.getElementById("downloadBtn");
+    var copyHexBtn = document.getElementById("copyHexBtn");
+    var copyRgbBtn = document.getElementById("copyRgbBtn");
+    var paletteCanvas = document.getElementById("paletteCanvas");
+
+    var colors = [];
+    var sourceUrl = null;
+    var extraction = 0;
+
+    function interleave(x) {
+      x = (x | (x << 16)) & 0x030000ff;
+      x = (x | (x << 8)) & 0x0300f00f;
+      x = (x | (x << 4)) & 0x030c30c3;
+      x = (x | (x << 2)) & 0x09249249;
+      return x >>> 0;
+    }
+
+    function mortonKey(value) {
+      return (interleave((value >>> 24) & 0xff) |
+        (interleave((value >>> 16) & 0xff) << 1) |
+        (interleave((value >>> 8) & 0xff) << 2)) >>> 0;
+    }
+
+    function hexFor(value) {
+      var r = (value >>> 24) & 0xff;
+      var g = (value >>> 16) & 0xff;
+      var b = (value >>> 8) & 0xff;
+      var a = value & 0xff;
+      function part(number) { return number.toString(16).padStart(2, "0").toUpperCase(); }
+      return "#" + part(r) + part(g) + part(b) + (a === 255 ? "" : part(a));
+    }
+
+    function rgbaFor(value) {
+      var r = (value >>> 24) & 0xff;
+      var g = (value >>> 16) & 0xff;
+      var b = (value >>> 8) & 0xff;
+      var a = (value & 0xff) / 255;
+      return "rgba(" + r + ", " + g + ", " + b + ", " + Number(a.toFixed(3)) + ")";
+    }
+
+    function setStatus(kind, label, hint) {
+      statusBadge.className = "badge " + kind;
+      statusBadge.textContent = label;
+      statusHint.textContent = hint || "";
+    }
+
+    function resetResults() {
+      colors = [];
+      swatchesEl.innerHTML = "";
+      countBadge.className = "badge muted";
+      countBadge.textContent = "0 colors";
+      emptyHint.classList.remove("hidden");
+      emptyHint.textContent = "Drop an image to see its palette.";
+      truncHint.textContent = "";
+      downloadBtn.disabled = true;
+      copyHexBtn.disabled = true;
+      copyRgbBtn.disabled = true;
+      paletteCanvas.width = 0;
+      paletteCanvas.height = 0;
+    }
+
+    function renderSwatches() {
+      swatchesEl.innerHTML = "";
+      var limit = 512;
+      var shown = Math.min(colors.length, limit);
+      for (var i = 0; i < shown; i++) {
+        var value = colors[i];
+        var swatch = document.createElement("div");
+        swatch.className = "swatch";
+        var color = document.createElement("div");
+        color.className = "color";
+        color.style.backgroundColor = rgbaFor(value);
+        var label = document.createElement("div");
+        label.className = "label";
+        label.textContent = hexFor(value);
+        label.title = rgbaFor(value);
+        swatch.appendChild(color);
+        swatch.appendChild(label);
+        swatchesEl.appendChild(swatch);
+      }
+      if (colors.length > limit) {
+        truncHint.textContent = "Showing the first " + limit + " of " + colors.length + " colors. Copy actions include all colors.";
+      } else {
+        truncHint.textContent = "";
+      }
+    }
+
+    function renderPaletteCanvas() {
+      var limit = 4096;
+      var count = Math.min(colors.length, limit);
+      var columns = Math.min(count, 64);
+      var rows = Math.max(1, Math.ceil(count / columns));
+      var cell = 32;
+      paletteCanvas.width = columns * cell;
+      paletteCanvas.height = rows * cell;
+      var ctx = paletteCanvas.getContext("2d");
+      for (var i = 0; i < count; i++) {
+        var value = colors[i];
+        var r = (value >>> 24) & 0xff;
+        var g = (value >>> 16) & 0xff;
+        var b = (value >>> 8) & 0xff;
+        var a = (value & 0xff) / 255;
+        ctx.fillStyle = "rgba(" + r + ", " + g + ", " + b + ", " + a + ")";
+        ctx.fillRect((i % columns) * cell, Math.floor(i / columns) * cell, cell, cell);
+      }
+      if (colors.length > limit) {
+        truncHint.textContent = "Palette PNG includes the first " + limit + " of " + colors.length + " colors.";
+      }
+    }
+
+    function extract(bitmap, file) {
+      var myExtraction = ++extraction;
+      setStatus("muted", "extracting…", "");
+      var canvas = document.createElement("canvas");
+      canvas.width = bitmap.width;
+      canvas.height = bitmap.height;
+      var ctx = canvas.getContext("2d", { willReadFrequently: true });
+      ctx.drawImage(bitmap, 0, 0);
+
+      var data;
+      try {
+        data = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      } catch (e) {
+        errorEl.textContent = "Could not read pixels from that image.";
+        setStatus("bad", "error", "");
+        return;
+      }
+      if (myExtraction !== extraction) return;
+
+      var set = new Set();
+      for (var i = 0; i < data.data.length; i += 4) {
+        var r = data.data[i];
+        var g = data.data[i + 1];
+        var b = data.data[i + 2];
+        var a = data.data[i + 3];
+        set.add(((r << 24) | (g << 16) | (b << 8) | a) >>> 0);
+      }
+
+      colors = Array.from(set);
+      colors.sort(function (a, b) {
+        var diff = mortonKey(a) - mortonKey(b);
+        return diff !== 0 ? diff : a - b;
+      });
+
+      countBadge.className = "badge";
+      countBadge.textContent = colors.length + " color" + (colors.length === 1 ? "" : "s");
+      emptyHint.classList.add("hidden");
+      renderSwatches();
+      renderPaletteCanvas();
+      downloadBtn.disabled = false;
+      copyHexBtn.disabled = false;
+      copyRgbBtn.disabled = false;
+      setStatus("ok", "extracted", bitmap.width + " × " + bitmap.height + " px · " +
+        colors.length + " unique colors · " + (file ? Toolkit.formatBytes(file.size) : ""));
+      errorEl.textContent = "";
+    }
+
+    function loadAsImage(file) {
+      return new Promise(function (resolve, reject) {
+        var image = new Image();
+        var url = URL.createObjectURL(file);
+        image.onload = function () { URL.revokeObjectURL(url); resolve(image); };
+        image.onerror = function () { URL.revokeObjectURL(url); reject(new Error("Could not decode that image.")); };
+        image.src = url;
+      });
+    }
+
+    async function loadFile(file) {
+      if (!file) return;
+      if (!/^image\//.test(file.type)) {
+        errorEl.textContent = "That file is not an image.";
+        setStatus("bad", "error", "");
+        return;
+      }
+      errorEl.textContent = "";
+      try {
+        var bitmap;
+        if (typeof createImageBitmap === "function") {
+          try {
+            bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
+          } catch (e) {
+            bitmap = await loadAsImage(file);
+          }
+        } else {
+          bitmap = await loadAsImage(file);
+        }
+        if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+        sourceUrl = URL.createObjectURL(file);
+        preview.src = sourceUrl;
+        preview.classList.remove("hidden");
+        sourceInfo.textContent = bitmap.width + " × " + bitmap.height + " px · " +
+          (file.type || "image") + " · " + Toolkit.formatBytes(file.size);
+        setTimeout(function () { extract(bitmap, file); }, 20);
+      } catch (e) {
+        errorEl.textContent = e && e.message ? e.message : String(e);
+        setStatus("bad", "error", "");
+      }
+    }
+
+    function clearAll() {
+      extraction++;
+      if (sourceUrl) URL.revokeObjectURL(sourceUrl);
+      sourceUrl = null;
+      preview.classList.add("hidden");
+      preview.removeAttribute("src");
+      sourceInfo.textContent = "No image loaded.";
+      fileInput.value = "";
+      resetResults();
+      errorEl.textContent = "";
+      setStatus("muted", "waiting for image", "");
+    }
+
+    dropZone.addEventListener("click", function () { fileInput.click(); });
+    dropZone.addEventListener("keydown", function (e) {
+      if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileInput.click(); }
+    });
+    dropZone.addEventListener("dragover", function (e) { e.preventDefault(); dropZone.classList.add("dragging"); });
+    dropZone.addEventListener("dragleave", function () { dropZone.classList.remove("dragging"); });
+    dropZone.addEventListener("drop", function (e) {
+      e.preventDefault();
+      dropZone.classList.remove("dragging");
+      loadFile(e.dataTransfer.files && e.dataTransfer.files[0]);
+    });
+    fileInput.addEventListener("change", function () { loadFile(fileInput.files[0]); });
+
+    downloadBtn.addEventListener("click", function () {
+      paletteCanvas.toBlob(function (blob) {
+        if (blob) Toolkit.download(blob, "palette.png");
+      }, "image/png");
+    });
+    copyHexBtn.addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(colors.map(hexFor).join("\n")).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    copyRgbBtn.addEventListener("click", function () {
+      var btn = this;
+      Toolkit.copyText(colors.map(rgbaFor).join("\n")).then(function () { Toolkit.flash(btn, "Copied!"); });
+    });
+    document.getElementById("clearBtn").addEventListener("click", clearAll);
+
+    resetResults();
+    setStatus("muted", "waiting for image", "");
+  </script>
+</body>
 </html>
