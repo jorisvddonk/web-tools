@@ -1,0 +1,22 @@
+[book]
+title = "web-tools"
+description = "Documentation for web-tools: small browser utilities that never upload your data."
+authors = ["Joris van der Donk"]
+language = "en"
+src = "src"
+
+[build]
+build-dir = "book"
+create-missing = false
+
+[output.html]
+git-repository-url = "https://github.com/jorisvddonk/web-tools"
+edit-url-template = "https://github.com/jorisvddonk/web-tools/edit/main/docs/{path}"
+default-theme = "light"
+preferred-dark-theme = "navy"
+
+[output.html.search]
+enable = true
+
+[output.html.fold]
+enable = false

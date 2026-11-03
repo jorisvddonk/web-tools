@@ -4,6 +4,8 @@ Simple static web tools that each do one thing. Everything runs locally in your 
 
 **Hosted at <https://jorisvddonk.github.io/web-tools/>**
 
+**Documentation: <https://jorisvddonk.github.io/web-tools/docs/>** — tutorials, how-to guides, reference and explanation, built with [mdBook](https://rust-lang.github.io/mdBook/) from [`docs/`](docs/).
+
 ## Tools
 
 ### Data & text
@@ -54,6 +56,8 @@ Simple static web tools that each do one thing. Everything runs locally in your 
 
 The diagram renderer intentionally omits PlantUML because it requires a server-side renderer.
 
+Full documentation for every tool lives in the mdBook guide under [`docs/`](docs/): start at the [tutorials](docs/src/tutorials/first-five-minutes.md), follow a [how-to guide](docs/src/how-to/format-and-validate-json.md), look things up in the [reference](docs/src/reference/tools.md), or read the [explanation](docs/src/explanation/architecture.md).
+
 The schema tester uses Ajv for draft-06/07/2019-09/2020-12 and [`@cfworker/json-schema`](https://github.com/cfworker/cfworker/tree/main/packages/json-schema) for draft-04. Draft-06 schemas are evaluated with Ajv's draft-07 engine, which shares the same semantics for keywords common to both drafts. Remote `$ref`s are not fetched.
 
 Some tools load libraries from a CDN: js-yaml, JSONPath Plus, qrcode, jsQR, Ajv, CodeMirror, Mermaid, Viz.js, D2, nomnoml, WaveDrom, Vega-Lite, ECharts, Markmap, bpmn-js, Svgbob, Pikchr and js-sequence-diagrams. All processing still happens in the browser.
@@ -87,7 +91,7 @@ The diagram renderer links the current format's syntax reference next to its hin
 
 ## Development
 
-The site is plain static HTML with no build step. Open `index.html` directly, or serve the directory:
+The site is plain static HTML with no build step. The docs are an mdBook built during deployment. Open `index.html` directly, or serve the directory:
 
 ```bash
 python3 -m http.server 8000
@@ -96,12 +100,32 @@ python3 -m http.server 8000
 
 Newer tools share [`style.css`](style.css), [`toolkit.js`](toolkit.js) and a small [`json-locator.js`](json-locator.js) helper; each tool keeps its own inline JavaScript and needs no build step.
 
+## Documentation
+
+The user guide is an [mdBook](https://rust-lang.github.io/mdBook/) in `docs/`, organised with [Diátaxis](https://diataxis.fr/):
+
+| Quadrant | Pages |
+| --- | --- |
+| Tutorials | [first five minutes](docs/src/tutorials/first-five-minutes.md), [build and share a diagram](docs/src/tutorials/build-and-share-a-diagram.md) |
+| How-to guides | [format and validate JSON](docs/src/how-to/format-and-validate-json.md), [render a diagram](docs/src/how-to/render-a-diagram.md), [share and restore diagrams](docs/src/how-to/share-and-restore-diagrams.md), and more |
+| Reference | [tools](docs/src/reference/tools.md), [diagram formats](docs/src/reference/diagram-formats.md), [storage and metadata](docs/src/reference/storage-and-metadata.md), [browser support](docs/src/reference/browser-support.md) |
+| Explanation | [architecture](docs/src/explanation/architecture.md), [privacy](docs/src/explanation/privacy.md), [diagram pipeline](docs/src/explanation/diagram-pipeline.md), [docs structure](docs/src/explanation/diataxis.md) |
+
+Build it locally (mdBook 0.5):
+
+```bash
+mdbook build docs            # output in docs/book
+mdbook serve docs --open     # live preview on http://localhost:3000
+```
+
 ## Deployment
 
-GitHub Pages deploys automatically from `main` via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). Push to `main` and the live site updates.
+GitHub Pages deploys automatically from `main` via [`.github/workflows/deploy.yml`](.github/workflows/deploy.yml). The workflow builds the mdBook into `_site/docs`, stages the static site next to it, and deploys `_site`, so the docs are published at `/docs/`. Push to `main` and the live site updates.
 
 ## Adding a tool
 
 1. Add a new `your-tool.html` page, link `./style.css`, and include an `&larr; all tools` link back to `index.html`.
 2. Add a card for it in `index.html`.
 3. Add a row to the table above.
+4. Add a row to the [tools reference](docs/src/reference/tools.md) and, if the tool needs a walkthrough, a page in the matching [Diátaxis](https://diataxis.fr/) quadrant under `docs/src/`, plus an entry in `docs/src/SUMMARY.md`.
+5. Run `mdbook build docs` to check the book still builds.
