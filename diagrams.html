@@ -4,90 +4,172 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>diagram renderer</title>
-  <meta name="description" content="Render Mermaid, Graphviz DOT, D2, Nomnoml, WaveDrom, Vega-Lite, Svgbob and Pikchr diagrams locally in your browser.">
+  <meta name="description" content="Render Mermaid, Graphviz DOT, D2, Nomnoml, WaveDrom, Vega-Lite, Svgbob, Pikchr and js-sequence-diagrams locally in your browser.">
   <link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/lib/codemirror.css">
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/lib/codemirror.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/addon/mode/simple.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/mode/javascript/javascript.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/addon/edit/matchbrackets.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/addon/edit/closebrackets.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/addon/selection/active-line.js"></script>
   <style>
-    .diagram-grid { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); }
-    @media (max-width: 900px) { .diagram-grid { grid-template-columns: 1fr; } }
-    #source { min-height: 26em; }
+    html, body { height: 100%; }
+    body { overflow: hidden; }
+    main.app {
+      max-width: none;
+      width: 100%;
+      height: 100vh;
+      height: 100dvh;
+      margin: 0;
+      padding: 0.7rem 1rem 0.55rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.45rem;
+    }
+    .appbar { display: flex; align-items: center; gap: 0.6rem; flex-wrap: wrap; flex: 0 0 auto; }
+    .appbar h1 { font-size: 1.25rem; margin: 0; }
+    .appbar .back { margin: 0; }
+    .appbar-controls { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; margin-left: auto; }
+    .appbar-label { font-size: 0.8rem; color: var(--muted); font-weight: 600; margin: 0; }
+    .appbar select { min-height: 2.2rem; width: auto; padding: 0.2rem 0.5rem; font-family: inherit; }
+    .appbar button { padding: 0.35rem 0.7rem; }
+    .format-hint { font-size: 0.78rem; color: var(--muted); min-height: 1.1em; margin: 0; flex: 0 0 auto; }
+    #error { flex: 0 0 auto; margin: 0; min-height: 0; }
+
+    .editor-grid {
+      flex: 1 1 auto;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 0.92fr) minmax(0, 1.08fr);
+      gap: 0.65rem;
+    }
+    .pane {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      flex-direction: column;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.55rem 0.65rem;
+      overflow: hidden;
+    }
+    .pane-head { display: flex; align-items: center; gap: 0.45rem; flex-wrap: wrap; margin-bottom: 0.45rem; font-size: 0.8rem; }
+    .pane-head strong { font-size: 0.85rem; }
+    .pane-head .hint { font-size: 0.75rem; }
+    .pane-head button { padding: 0.25rem 0.6rem; font-size: 0.78rem; }
+    .editor-wrap { flex: 1 1 auto; min-height: 0; }
+    .editor-wrap .CodeMirror {
+      height: 100% !important;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-family: var(--mono);
+      font-size: 0.88rem;
+      line-height: 1.55;
+      background: #fff;
+    }
+    .editor-wrap .CodeMirror-gutters { background: #fbfaf8; border-right: 1px solid var(--border); }
+    .editor-wrap .CodeMirror-linenumber { color: #a8a69f; }
+    .editor-wrap .CodeMirror-cursor { border-left: 2px solid var(--accent); }
+    .editor-wrap .CodeMirror-activeline-background { background: #faf9ff; }
+    .editor-wrap textarea { height: 100%; min-height: 20rem; }
+    .cm-keyword { color: #7c4dff; font-weight: 600; }
+    .cm-string { color: #0b6e4f; }
+    .cm-comment { color: #8a8984; font-style: italic; }
+    .cm-number { color: #a35200; }
+    .cm-operator { color: #b00020; font-weight: 600; }
+    .cm-bracket { color: #5b34d6; }
+    .cm-variable { color: var(--fg); }
+    .cm-atom { color: #a35200; }
+
     .preview {
-      min-height: 28rem;
-      max-height: 72vh;
+      flex: 1 1 auto;
+      min-height: 0;
       overflow: auto;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
       border: 1px solid var(--border);
       border-radius: 8px;
       background: #fff;
       padding: 1rem;
-      display: flex;
-      align-items: flex-start;
-      justify-content: center;
     }
     .preview svg { max-width: 100%; height: auto; }
     .preview .hint { align-self: center; }
-    .diagram-actions { flex-wrap: wrap; }
+    .app-footer { flex: 0 0 auto; font-size: 0.7rem; color: var(--muted); margin: 0; padding: 0 0.2rem; }
+
+    @media (max-width: 900px) {
+      body { overflow: auto; }
+      main.app { height: auto; min-height: 100dvh; padding: 0.7rem; }
+      .appbar h1 { font-size: 1.05rem; }
+      .appbar-controls { margin-left: 0; width: 100%; }
+      .editor-grid { display: flex; flex-direction: column; }
+      .editor-wrap { height: 45vh; flex: 0 0 auto; }
+      .preview { height: 55vh; flex: 0 0 auto; }
+    }
   </style>
 </head>
 <body>
-  <main class="wide">
-    <a class="back" href="./index.html">&larr; all tools</a>
-    <h1>diagram renderer</h1>
-    <p class="subtitle">Render text-based diagrams locally. Eight engines, no server required.</p>
+  <main class="app">
+    <header class="appbar">
+      <a class="back" href="./index.html">&larr; all tools</a>
+      <h1>diagram renderer</h1>
+      <div class="appbar-controls">
+        <label class="appbar-label" for="formatSel">Format</label>
+        <select id="formatSel" aria-label="Diagram format">
+          <option value="mermaid" selected>Mermaid</option>
+          <option value="dot">Graphviz DOT</option>
+          <option value="d2">D2</option>
+          <option value="nomnoml">Nomnoml</option>
+          <option value="wavedrom">WaveDrom</option>
+          <option value="vega">Vega-Lite</option>
+          <option value="svgbob">Svgbob</option>
+          <option value="pikchr">Pikchr</option>
+          <option value="sequence">js-sequence-diagrams</option>
+        </select>
+        <label class="appbar-label" for="exampleSel">Example</label>
+        <select id="exampleSel" aria-label="Example diagram"></select>
+        <button id="fullscreenBtn" type="button" class="secondary">Fullscreen</button>
+      </div>
+    </header>
+    <div class="format-hint" id="formatHint"></div>
+    <div class="error" id="error" role="alert"></div>
 
-    <div class="row" style="margin-top:0">
-      <label for="formatSel" style="margin:0">Format</label>
-      <select id="formatSel" aria-label="Diagram format">
-        <option value="mermaid" selected>Mermaid</option>
-        <option value="dot">Graphviz DOT</option>
-        <option value="d2">D2</option>
-        <option value="nomnoml">Nomnoml</option>
-        <option value="wavedrom">WaveDrom (WaveJSON)</option>
-        <option value="vega">Vega-Lite (JSON)</option>
-        <option value="svgbob">Svgbob (ASCII)</option>
-        <option value="pikchr">Pikchr</option>
-      </select>
-      <span class="spacer"></span>
-      <button id="exampleBtn" type="button" class="secondary">Load example</button>
-    </div>
-    <div class="hint" id="formatHint" style="margin-top:0.5rem"></div>
-
-    <div class="grid diagram-grid" style="margin-top:0.75rem">
-      <section class="card" style="margin-top:0">
-        <label for="source" style="margin-top:0">Source</label>
-        <textarea id="source" class="tall" spellcheck="false"></textarea>
-        <div class="opts">
-          <label><input type="checkbox" id="liveChk" checked> Render live</label>
-        </div>
-        <div class="row">
+    <div class="editor-grid">
+      <section class="pane">
+        <div class="pane-head">
+          <strong>Source</strong>
+          <span class="hint" id="editorHint">syntax highlighting active</span>
+          <span class="spacer"></span>
+          <label class="hint" style="display:flex;align-items:center;gap:0.3rem"><input type="checkbox" id="liveChk" checked> Live</label>
           <button id="renderBtn" type="button">Render</button>
           <button id="clearBtn" type="button" class="secondary">Clear</button>
-          <span class="spacer"></span>
-          <span class="hint">Ctrl/Cmd + Enter</span>
+        </div>
+        <div class="editor-wrap">
+          <textarea id="source" spellcheck="false"></textarea>
         </div>
       </section>
 
-      <section class="card" style="margin-top:0">
-        <div class="row" style="margin-top:0">
-          <h2 style="margin:0">Preview</h2>
-          <span class="spacer"></span>
+      <section class="pane">
+        <div class="pane-head">
+          <strong>Preview</strong>
           <span id="statusBadge" class="badge muted">waiting</span>
-        </div>
-        <div class="hint" id="statusHint" style="margin-top:0.35rem"></div>
-        <div class="error" id="error" role="alert"></div>
-        <div class="row diagram-actions">
-          <button id="downloadSvgBtn" type="button" class="secondary" disabled>Download SVG</button>
-          <button id="downloadPngBtn" type="button" class="secondary" disabled>Download PNG</button>
+          <span id="statusHint" class="hint"></span>
+          <span class="spacer"></span>
+          <button id="downloadSvgBtn" type="button" class="secondary" disabled>SVG</button>
+          <button id="downloadPngBtn" type="button" class="secondary" disabled>PNG</button>
           <button id="copySvgBtn" type="button" class="secondary" disabled>Copy SVG</button>
         </div>
-        <div class="preview" id="preview" style="margin-top:0.75rem">
+        <div class="preview" id="preview">
           <div class="hint" id="previewEmpty">Render a diagram to see it here.</div>
         </div>
       </section>
     </div>
 
-    <footer>
-      Mermaid, Graphviz (Viz.js), D2, nomnoml, WaveDrom, Vega-Lite, Svgbob and Pikchr.
-      Libraries load from CDNs on first use; source text and rendered diagrams stay in your browser.
-      PlantUML is not included because it needs a server-side renderer.
+    <footer class="app-footer">
+      Mermaid · Graphviz (Viz.js) · D2 · Nomnoml · WaveDrom · Vega-Lite · Svgbob · Pikchr · js-sequence-diagrams.
+      All rendering is client-side; libraries load from CDNs. PlantUML is omitted because it needs a server.
     </footer>
   </main>
 
@@ -95,12 +177,13 @@
   <script>
     "use strict";
     var formatSel = document.getElementById("formatSel");
-    var source = document.getElementById("source");
+    var exampleSel = document.getElementById("exampleSel");
+    var sourceTextarea = document.getElementById("source");
     var liveChk = document.getElementById("liveChk");
     var formatHint = document.getElementById("formatHint");
+    var errorEl = document.getElementById("error");
     var statusBadge = document.getElementById("statusBadge");
     var statusHint = document.getElementById("statusHint");
-    var errorEl = document.getElementById("error");
     var preview = document.getElementById("preview");
     var previewEmpty = document.getElementById("previewEmpty");
     var downloadSvgBtn = document.getElementById("downloadSvgBtn");
@@ -111,93 +194,196 @@
       mermaid: {
         label: "Mermaid",
         hint: "Flowcharts, sequence, class, state, ER, gantt, mindmap, gitGraph, timeline and more.",
-        example: "flowchart LR\n" +
-          "  Client[Client] --> API[API]\n" +
-          "  API --> DB[(Database)]\n" +
-          "  API --> Cache[Cache]\n" +
-          "  DB --> API"
+        mode: "mermaid",
+        examples: [
+          {
+            name: "Architecture flowchart",
+            code: "flowchart LR\n  Client[Client] --> API[API]\n  API --> DB[(Database)]\n  API --> Cache[Cache]\n  DB --> API"
+          },
+          {
+            name: "Sequence diagram",
+            code: "sequenceDiagram\n  autonumber\n  participant C as Client\n  participant A as API\n  participant D as Database\n  C->>A: POST /orders\n  A->>D: INSERT order\n  D-->>A: order id\n  A-->>C: 201 Created"
+          },
+          {
+            name: "Class diagram",
+            code: "classDiagram\n  class Shape {\n    <<abstract>>\n    +area() double\n  }\n  class Circle {\n    +radius double\n    +area() double\n  }\n  class Square {\n    +side double\n    +area() double\n  }\n  Shape <|-- Circle\n  Shape <|-- Square"
+          },
+          {
+            name: "Entity relationship",
+            code: "erDiagram\n  CUSTOMER ||--o{ ORDER : places\n  ORDER ||--|{ LINE_ITEM : contains\n  CUSTOMER {\n    string name\n    string email\n  }\n  ORDER {\n    int id\n    date created\n  }"
+          },
+          {
+            name: "Gantt chart",
+            code: "gantt\n  title Release plan\n  dateFormat YYYY-MM-DD\n  section Design\n  Sketch :a1, 2026-01-05, 5d\n  Review :a2, after a1, 2d\n  section Build\n  Implement :b1, after a2, 10d\n  Test :b2, after b1, 4d"
+          }
+        ]
       },
       dot: {
         label: "Graphviz DOT",
         hint: "Directed or undirected graphs using the DOT language.",
-        example: "digraph G {\n" +
-          "  rankdir=LR;\n" +
-          "  Client -> API;\n" +
-          "  API -> Database [label=\"SQL\"];\n" +
-          "  API -> Cache [label=\"read\"];\n" +
-          "  Database [shape=cylinder];\n" +
-          "}"
+        mode: "dot",
+        examples: [
+          {
+            name: "Service digraph",
+            code: "digraph G {\n  rankdir=LR;\n  Client -> API;\n  API -> Database [label=\"SQL\"];\n  API -> Cache [label=\"read\"];\n  Database [shape=cylinder];\n}"
+          },
+          {
+            name: "Undirected graph",
+            code: "graph G {\n  node [shape=box, style=rounded];\n  A -- B [label=\"1\"];\n  B -- C;\n  C -- A;\n  B -- D;\n}"
+          },
+          {
+            name: "Clustered architecture",
+            code: "digraph G {\n  rankdir=LR;\n  node [shape=box, style=\"rounded,filled\", fillcolor=\"#f7f6f3\"];\n  subgraph cluster_client { label=\"Client\"; Browser; Mobile; }\n  subgraph cluster_server { label=\"Server\"; API; Worker; }\n  subgraph cluster_data { label=\"Data\"; DB; Cache; }\n  Browser -> API;\n  Mobile -> API;\n  API -> Worker;\n  API -> Cache;\n  Worker -> DB;\n}"
+          },
+          {
+            name: "State machine",
+            code: "digraph FSM {\n  rankdir=LR;\n  node [shape=circle];\n  start [shape=point];\n  start -> Idle;\n  Idle -> Running [label=\"start\"];\n  Running -> Idle [label=\"stop\"];\n  Running -> Failed [label=\"error\"];\n  Failed -> Idle [label=\"reset\"];\n}"
+          }
+        ]
       },
       d2: {
         label: "D2",
         hint: "Declarative diagram scripting with containers, shapes and connections.",
-        example: "client: Client\n" +
-          "api: API\n" +
-          "db: Database { shape: cylinder }\n" +
-          "cache: Cache\n" +
-          "client -> api: request\n" +
-          "api -> db: SQL\n" +
-          "api -> cache: read"
+        mode: "d2",
+        examples: [
+          {
+            name: "Service architecture",
+            code: "client: Client\napi: API\ndb: Database { shape: cylinder }\ncache: Cache\nclient -> api: request\napi -> db: SQL\napi -> cache: read"
+          },
+          {
+            name: "Containers",
+            code: "direction: right\nfrontend: Frontend {\n  web: Web\n  mobile: Mobile\n}\nbackend: Backend {\n  api: API\n  worker: Worker\n  db: Database { shape: cylinder }\n}\nfrontend.web -> backend.api\nfrontend.mobile -> backend.api\nbackend.api -> backend.worker\nbackend.worker -> backend.db"
+          },
+          {
+            name: "Cloud deployment",
+            code: "direction: down\nusers: Users { shape: cloud }\ncdn: CDN { shape: cloud }\napp: App\ndb: Database { shape: cylinder }\nusers -> cdn\ncdn -> app\napp -> db"
+          }
+        ]
       },
       nomnoml: {
         label: "Nomnoml",
         hint: "UML-style diagrams with a compact bracket syntax.",
-        example: "[Client] -> [API]\n" +
-          "[API] -> [Database]\n" +
-          "[API] -> [Cache]\n" +
-          "[<abstract>Shape|+ area(): number]\n" +
-          "[Circle] -> [Shape]"
+        mode: "nomnoml",
+        examples: [
+          {
+            name: "Service flow",
+            code: "[Client] -> [API]\n[API] -> [Database]\n[API] -> [Cache]"
+          },
+          {
+            name: "Class diagram",
+            code: "[<abstract>Shape|+ area(): number]\n[Circle|+ radius: number]\n[Square|+ side: number]\n[Circle] -> [Shape]\n[Square] -> [Shape]"
+          },
+          {
+            name: "Layered system",
+            code: "[Browser] -> [CDN]\n[Browser] -> [API]\n[API] -> [Service]\n[Service] -> [Database]\n[Service] -> [Cache]"
+          }
+        ]
       },
       wavedrom: {
         label: "WaveDrom",
         hint: "Digital timing diagrams described as WaveJSON.",
-        example: "{\n" +
-          "  \"signal\": [\n" +
-          "    { \"name\": \"clk\", \"wave\": \"p........\" },\n" +
-          "    { \"name\": \"req\", \"wave\": \"0.1..0...\" },\n" +
-          "    { \"name\": \"data\", \"wave\": \"x.34.5x..\", \"data\": [\"head\", \"body\", \"tail\"] }\n" +
-          "  ]\n" +
-          "}"
+        mode: { name: "javascript", json: true },
+        examples: [
+          {
+            name: "Basic timing",
+            code: "{\n  \"signal\": [\n    { \"name\": \"clk\", \"wave\": \"p........\" },\n    { \"name\": \"req\", \"wave\": \"0.1..0...\" },\n    { \"name\": \"data\", \"wave\": \"x.34.5x..\", \"data\": [\"head\", \"body\", \"tail\"] }\n  ]\n}"
+          },
+          {
+            name: "Bus transaction",
+            code: "{\n  \"signal\": [\n    { \"name\": \"clk\", \"wave\": \"p........\" },\n    { \"name\": \"valid\", \"wave\": \"0.1....0.\" },\n    { \"name\": \"addr\", \"wave\": \"x.3....x.\", \"data\": [\"0x20\"] },\n    { \"name\": \"data\", \"wave\": \"x..45..x.\", \"data\": [\"D0\", \"D1\"] }\n  ]\n}"
+          },
+          {
+            name: "Clock and reset",
+            code: "{\n  \"signal\": [\n    { \"name\": \"clk\", \"wave\": \"p........\" },\n    { \"name\": \"rst\", \"wave\": \"10.......\" },\n    { \"name\": \"state\", \"wave\": \"x.3.4.5x.\", \"data\": [\"IDLE\", \"RUN\", \"DONE\"] }\n  ]\n}"
+          }
+        ]
       },
       vega: {
         label: "Vega-Lite",
         hint: "Charts and visualizations from a JSON grammar. Vega specs also work.",
-        example: "{\n" +
-          "  \"$schema\": \"https://vega.github.io/schema/vega-lite/v5.json\",\n" +
-          "  \"data\": { \"values\": [\n" +
-          "    { \"category\": \"A\", \"value\": 28 },\n" +
-          "    { \"category\": \"B\", \"value\": 55 },\n" +
-          "    { \"category\": \"C\", \"value\": 43 }\n" +
-          "  ] },\n" +
-          "  \"mark\": \"bar\",\n" +
-          "  \"encoding\": {\n" +
-          "    \"x\": { \"field\": \"category\", \"type\": \"nominal\" },\n" +
-          "    \"y\": { \"field\": \"value\", \"type\": \"quantitative\" }\n" +
-          "  }\n" +
-          "}"
+        mode: { name: "javascript", json: true },
+        examples: [
+          {
+            name: "Bar chart",
+            code: "{\n  \"$schema\": \"https://vega.github.io/schema/vega-lite/v5.json\",\n  \"data\": { \"values\": [\n    { \"category\": \"A\", \"value\": 28 },\n    { \"category\": \"B\", \"value\": 55 },\n    { \"category\": \"C\", \"value\": 43 }\n  ] },\n  \"mark\": \"bar\",\n  \"encoding\": {\n    \"x\": { \"field\": \"category\", \"type\": \"nominal\" },\n    \"y\": { \"field\": \"value\", \"type\": \"quantitative\" }\n  }\n}"
+          },
+          {
+            name: "Line chart",
+            code: "{\n  \"$schema\": \"https://vega.github.io/schema/vega-lite/v5.json\",\n  \"data\": { \"values\": [\n    { \"date\": \"2026-01-01\", \"value\": 12 },\n    { \"date\": \"2026-02-01\", \"value\": 18 },\n    { \"date\": \"2026-03-01\", \"value\": 15 },\n    { \"date\": \"2026-04-01\", \"value\": 24 }\n  ] },\n  \"mark\": { \"type\": \"line\", \"point\": true },\n  \"encoding\": {\n    \"x\": { \"field\": \"date\", \"type\": \"temporal\" },\n    \"y\": { \"field\": \"value\", \"type\": \"quantitative\" }\n  }\n}"
+          },
+          {
+            name: "Scatter plot",
+            code: "{\n  \"$schema\": \"https://vega.github.io/schema/vega-lite/v5.json\",\n  \"data\": { \"values\": [\n    { \"x\": 1, \"y\": 2 }, { \"x\": 2, \"y\": 5 },\n    { \"x\": 3, \"y\": 3 }, { \"x\": 4, \"y\": 7 }\n  ] },\n  \"mark\": \"point\",\n  \"encoding\": {\n    \"x\": { \"field\": \"x\", \"type\": \"quantitative\" },\n    \"y\": { \"field\": \"y\", \"type\": \"quantitative\" }\n  }\n}"
+          }
+        ]
       },
       svgbob: {
         label: "Svgbob",
         hint: "Turn ASCII art diagrams into clean SVG paths.",
-        example: "   .--------.       .-------.\n" +
-          "   | Client | ----> |  API  |\n" +
-          "   '--------'       '-------'\n" +
-          "                         |\n" +
-          "                         v\n" +
-          "                    .----------.\n" +
-          "                    | Database |\n" +
-          "                    '----------'"
+        mode: null,
+        examples: [
+          {
+            name: "Boxes",
+            code: "   .--------.       .-------.\n   | Client | ----> |  API  |\n   '--------'       '-------'\n                         |\n                         v\n                    .----------.\n                    | Database |\n                    '----------'"
+          },
+          {
+            name: "Pipeline",
+            code: "+--------+     +--------+     +----------+\n| Client | --> |  API   | --> | Database |\n+--------+     +--------+     +----------+"
+          },
+          {
+            name: "Table",
+            code: ".------------+------------+--------.\n| Name       | Role       | Active |\n+------------+------------+--------+\n| Ada        | engineer   | yes    |\n| Grace      | admiral    | no     |\n'------------+------------+--------'"
+          }
+        ]
       },
       pikchr: {
         label: "Pikchr",
         hint: "PIC-like diagrams with boxes, arrows, circles and labels.",
-        example: "box \"Client\" fit\n" +
-          "arrow right\n" +
-          "box \"API\" fit\n" +
-          "arrow down\n" +
-          "box \"Database\" fit"
+        mode: "pikchr",
+        examples: [
+          {
+            name: "Box flow",
+            code: "box \"Client\" fit\narrow right\nbox \"API\" fit\narrow down\nbox \"Database\" fit"
+          },
+          {
+            name: "Architecture",
+            code: "box \"Browser\" fit\narrow right\nbox \"Web server\" fit\narrow right\nbox \"Database\" fit"
+          },
+          {
+            name: "Circle to ellipse",
+            code: "circle \"Start\" fit\narrow down\nbox \"Process\" fit\narrow down\nellipse \"Done\" fit"
+          }
+        ]
+      },
+      sequence: {
+        label: "js-sequence-diagrams",
+        hint: "Simple sequence diagrams with participants, notes and arrows.",
+        mode: "sequence",
+        examples: [
+          {
+            name: "Basic conversation",
+            code: "Alice->Bob: Hello Bob, how are you?\nNote right of Bob: Bob thinks\nBob-->Alice: I am good thanks!"
+          },
+          {
+            name: "Authentication flow",
+            code: "title: Authentication flow\nparticipant Client\nparticipant API\nparticipant Database\nClient->API: POST /login\nAPI->Database: SELECT user\nDatabase-->API: user row\nAPI-->Client: 200 + token"
+          },
+          {
+            name: "Arrow styles and notes",
+            code: "Alice->Bob: solid filled\nAlice-->Bob: dotted filled\nAlice->>Bob: solid open\nAlice-->>Bob: dotted open\nNote left of Alice: a note\nNote over Alice,Bob: shared note"
+          }
+        ]
       }
     };
+
+    var previousFormat = "mermaid";
+    var editor = null;
+    var suppressChange = false;
+    var renderSeq = 0;
+    var renderTimer = null;
+    var renderLock = Promise.resolve();
+    var lastSvg = "";
+    var lastFormat = "mermaid";
 
     var scriptPromises = Object.create(null);
     var mermaidPromise = null;
@@ -208,11 +394,129 @@
     var vegaPromise = null;
     var bobPromise = null;
     var pikchrPromise = null;
-    var previousFormat = "mermaid";
-    var lastSvg = "";
-    var lastFormat = "mermaid";
-    var renderSeq = 0;
-    var renderTimer = null;
+    var sequencePromise = null;
+
+    if (window.CodeMirror) {
+      CodeMirror.defineSimpleMode("mermaid", {
+        start: [
+          { regex: /%%.*/, token: "comment" },
+          { regex: /"(?:[^\\"]|\\.)*"/, token: "string" },
+          { regex: /\b(?:flowchart|graph|sequenceDiagram|classDiagram|stateDiagram|stateDiagram-v2|erDiagram|gantt|pie|mindmap|gitGraph|timeline|quadrantChart|journey|subgraph|end|participant|actor|note|loop|alt|else|opt|par|and|rect|activate|deactivate|autonumber|class|direction|title|section)\b/, token: "keyword" },
+          { regex: /-->|---|==>|-\.->|->>|-->>|->|--|\.\./, token: "operator" },
+          { regex: /\b\d+(?:\.\d+)?\b/, token: "number" },
+          { regex: /[A-Za-z_$][\w$]*/, token: "variable" }
+        ],
+        meta: { lineComment: "%%" }
+      });
+
+      CodeMirror.defineSimpleMode("dot", {
+        start: [
+          { regex: /\/\/.*/, token: "comment" },
+          { regex: /\/\*/, token: "comment", next: "comment" },
+          { regex: /"(?:[^\\"]|\\.)*"/, token: "string" },
+          { regex: /\b(?:strict|graph|digraph|subgraph|node|edge)\b/, token: "keyword" },
+          { regex: /->|--/, token: "operator" },
+          { regex: /\b\d+(?:\.\d+)?\b/, token: "number" },
+          { regex: /[A-Za-z_]\w*/, token: "variable" }
+        ],
+        comment: [
+          { regex: /\*\//, token: "comment", next: "start" },
+          { regex: /./, token: "comment" }
+        ],
+        meta: { lineComment: "//" }
+      });
+
+      CodeMirror.defineSimpleMode("d2", {
+        start: [
+          { regex: /#.*/, token: "comment" },
+          { regex: /"(?:[^\\"]|\\.)*"/, token: "string" },
+          { regex: /\b(?:shape|style|label|direction|class|classes|near|icon|constraint|link|tooltip|grid|layers|scenario|vars|import|vars|sql_table|sequence_diagram)\b/, token: "keyword" },
+          { regex: /<->|->|<-|--/, token: "operator" },
+          { regex: /\b\d+(?:\.\d+)?\b/, token: "number" },
+          { regex: /[A-Za-z_]\w*/, token: "variable" }
+        ],
+        meta: { lineComment: "#" }
+      });
+
+      CodeMirror.defineSimpleMode("nomnoml", {
+        start: [
+          { regex: /\/\/.*/, token: "comment" },
+          { regex: /"[^"]*"/, token: "string" },
+          { regex: /<->|<-->|-->|->|--|-/, token: "operator" },
+          { regex: /[\[\]|:]/, token: "bracket" },
+          { regex: /\b\d+(?:\.\d+)?\b/, token: "number" },
+          { regex: /[A-Za-z_]\w*/, token: "variable" }
+        ],
+        meta: { lineComment: "//" }
+      });
+
+      CodeMirror.defineSimpleMode("pikchr", {
+        start: [
+          { regex: /#.*/, token: "comment" },
+          { regex: /"(?:[^\\"]|\\.)*"/, token: "string" },
+          { regex: /\b(?:box|circle|ellipse|oval|cylinder|file|diamond|arrow|line|spline|move|right|left|up|down|at|from|to|then|fit|color|fill|thickness|dashed|dotted|invis|invisible|same|with|behind|chop|radius|text|above|below|behind|until|even|along)\b/, token: "keyword" },
+          { regex: /\b\d+(?:\.\d+)?\b/, token: "number" },
+          { regex: /[A-Za-z_]\w*/, token: "variable" }
+        ],
+        meta: { lineComment: "#" }
+      });
+
+      CodeMirror.defineSimpleMode("sequence", {
+        start: [
+          { regex: /#.*/, token: "comment" },
+          { regex: /"[^"]*"/, token: "string" },
+          { regex: /\b(?:title|participant|note|left|right|over|of)\b/, token: "keyword" },
+          { regex: /-->>|->>|-->|->/, token: "operator" },
+          { regex: /\b\d+(?:\.\d+)?\b/, token: "number" },
+          { regex: /[A-Za-z_]\w*/, token: "variable" }
+        ],
+        meta: { lineComment: "#" }
+      });
+    }
+
+    if (window.CodeMirror) {
+      editor = CodeMirror.fromTextArea(sourceTextarea, {
+        lineNumbers: true,
+        mode: "mermaid",
+        lineWrapping: true,
+        matchBrackets: true,
+        autoCloseBrackets: true,
+        styleActiveLine: true,
+        indentUnit: 2,
+        tabSize: 2
+      });
+      editor.setSize("100%", "100%");
+      editor.on("change", function () {
+        if (!suppressChange) {
+          markCustomExample();
+          if (liveChk.checked) schedule();
+        }
+      });
+    } else {
+      document.getElementById("editorHint").textContent = "plain text editor";
+      sourceTextarea.style.display = "block";
+      sourceTextarea.addEventListener("input", function () {
+        markCustomExample();
+        if (liveChk.checked) schedule();
+      });
+    }
+
+    function getSource() {
+      return editor ? editor.getValue() : sourceTextarea.value;
+    }
+
+    function setSource(value) {
+      suppressChange = true;
+      if (editor) editor.setValue(value);
+      else sourceTextarea.value = value;
+      suppressChange = false;
+    }
+
+    function setMode(format) {
+      if (!editor) return;
+      editor.setOption("mode", FORMATS[format].mode);
+      editor.setOption("lineWrapping", true);
+    }
 
     function loadScript(url, globalName) {
       if (window[globalName]) return Promise.resolve(window[globalName]);
@@ -246,10 +550,7 @@
             fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
           });
           return mermaid;
-        }).catch(function (e) {
-          mermaidPromise = null;
-          throw e;
-        });
+        }).catch(function (e) { mermaidPromise = null; throw e; });
       }
       return mermaidPromise;
     }
@@ -259,10 +560,7 @@
         nomnomlPromise = loadScript("https://cdn.jsdelivr.net/npm/graphre@0.1.2/dist/graphre.js", "graphre")
           .then(function () {
             return loadScript("https://cdn.jsdelivr.net/npm/nomnoml@1.7.0/dist/nomnoml.js", "nomnoml");
-          }).catch(function (e) {
-            nomnomlPromise = null;
-            throw e;
-          });
+          }).catch(function (e) { nomnomlPromise = null; throw e; });
       }
       return nomnomlPromise;
     }
@@ -274,10 +572,7 @@
             return loadScript("https://cdn.jsdelivr.net/npm/wavedrom@3.8.0/skins/default.js", "WaveSkin");
           }).then(function () {
             return window.WaveDrom;
-          }).catch(function (e) {
-            wavedromPromise = null;
-            throw e;
-          });
+          }).catch(function (e) { wavedromPromise = null; throw e; });
       }
       return wavedromPromise;
     }
@@ -346,15 +641,33 @@
       return pikchrPromise;
     }
 
+    function getSequence() {
+      if (!sequencePromise) {
+        sequencePromise = loadScript("https://cdn.jsdelivr.net/npm/underscore@1.13.6/underscore-umd-min.js", "_")
+          .then(function () {
+            return loadScript("https://cdn.jsdelivr.net/npm/snapsvg@0.5.1/dist/snap.svg-min.js", "Snap");
+          }).then(function () {
+            // js-sequence-diagrams waits for a font via WebFont before drawing.
+            // The simple theme uses system fonts, so answer immediately.
+            if (!window.WebFont) {
+              window.WebFont = { load: function (options) { if (options && options.active) options.active(); } };
+            }
+            return loadScript("https://cdn.jsdelivr.net/gh/bramp/js-sequence-diagrams@v2.0.1/dist/sequence-diagram-min.js", "Diagram");
+          }).catch(function (e) {
+            sequencePromise = null;
+            throw new Error("Could not load js-sequence-diagrams: " + (e && e.message ? e.message : String(e)));
+          });
+      }
+      return sequencePromise;
+    }
+
     function sanitizeSvg(svg) {
       try {
         var documentNode = new DOMParser().parseFromString(svg, "image/svg+xml");
         var root = documentNode.documentElement;
         if (!root || documentNode.querySelector("parsererror")) return svg;
-
         var bad = root.querySelectorAll("script, iframe, object, embed");
         Array.prototype.forEach.call(bad, function (node) { node.remove(); });
-
         var elements = [root].concat(Array.prototype.slice.call(root.querySelectorAll("*")));
         elements.forEach(function (element) {
           if (!element.attributes) return;
@@ -455,6 +768,24 @@
       return pikchr.render(text);
     }
 
+    async function renderSequence(text, seq) {
+      await getSequence();
+      var stage = document.createElement("div");
+      stage.id = "sequence-stage-" + seq;
+      stage.style.position = "fixed";
+      stage.style.left = "-100000px";
+      stage.style.top = "0";
+      document.body.appendChild(stage);
+      try {
+        Diagram.parse(text).drawSVG(stage.id, { theme: "simple", "font-family": "sans-serif" });
+        var svg = stage.querySelector("svg");
+        if (!svg) throw new Error("js-sequence-diagrams did not produce an SVG.");
+        return svg.outerHTML;
+      } finally {
+        stage.remove();
+      }
+    }
+
     async function renderFormat(format, text, seq) {
       if (format === "mermaid") return renderMermaid(text, seq);
       if (format === "dot") return renderDot(text);
@@ -464,6 +795,7 @@
       if (format === "vega") return renderVega(text);
       if (format === "svgbob") return renderSvgbob(text);
       if (format === "pikchr") return renderPikchr(text);
+      if (format === "sequence") return renderSequence(text, seq);
       throw new Error("Unknown format.");
     }
 
@@ -490,7 +822,8 @@
     async function render() {
       var seq = ++renderSeq;
       errorEl.textContent = "";
-      if (!source.value.trim()) {
+      var text = getSource();
+      if (!text.trim()) {
         clearPreview();
         setStatus("muted", "waiting", FORMATS[formatSel.value].label);
         return;
@@ -503,7 +836,12 @@
       var started = performance.now();
 
       try {
-        var svg = await renderFormat(format, source.value, seq);
+        var run = renderLock.then(function () {
+          if (seq !== renderSeq) return null;
+          return renderFormat(format, text, seq);
+        });
+        renderLock = run.catch(function () {});
+        var svg = await run;
         if (seq !== renderSeq) return;
         if (!svg || typeof svg !== "string") throw new Error("The renderer returned no SVG.");
         svg = sanitizeSvg(svg);
@@ -524,13 +862,44 @@
 
     function schedule() {
       clearTimeout(renderTimer);
-      renderTimer = setTimeout(render, 600);
+      renderTimer = setTimeout(render, 650);
     }
 
-    function setFormat(format, loadExample) {
+    function populateExamples(format) {
+      exampleSel.innerHTML = "";
+      var custom = document.createElement("option");
+      custom.value = "";
+      custom.textContent = "Custom source";
+      exampleSel.appendChild(custom);
+      FORMATS[format].examples.forEach(function (example, index) {
+        var option = document.createElement("option");
+        option.value = String(index);
+        option.textContent = example.name;
+        exampleSel.appendChild(option);
+      });
+    }
+
+    function setFormat(format) {
       previousFormat = format;
       formatHint.textContent = FORMATS[format].hint;
-      if (loadExample) source.value = FORMATS[format].example;
+      document.getElementById("editorHint").textContent = FORMATS[format].mode ? "syntax highlighting active" : "plain text";
+      populateExamples(format);
+      setMode(format);
+    }
+
+    function loadExample(index, doRender) {
+      var examples = FORMATS[formatSel.value].examples;
+      if (index < 0 || index >= examples.length) return;
+      exampleSel.value = String(index);
+      setSource(examples[index].code);
+      if (doRender) render();
+    }
+
+    function markCustomExample() {
+      if (!exampleSel.value) return;
+      var index = Number(exampleSel.value);
+      var examples = FORMATS[formatSel.value].examples;
+      if (examples[index] && examples[index].code !== getSource()) exampleSel.value = "";
     }
 
     function downloadPng() {
@@ -553,12 +922,12 @@
         try {
           canvas.toBlob(function (png) {
             if (png) Toolkit.download(png, lastFormat + ".png");
-            else errorEl.textContent = "PNG export failed; use Download SVG instead.";
+            else errorEl.textContent = "PNG export failed; use SVG instead.";
             URL.revokeObjectURL(url);
           }, "image/png");
         } catch (e) {
           URL.revokeObjectURL(url);
-          errorEl.textContent = "PNG export failed: " + (e && e.message ? e.message : String(e)) + ". Use Download SVG instead.";
+          errorEl.textContent = "PNG export failed: " + (e && e.message ? e.message : String(e)) + ". Use SVG instead.";
         }
       };
       image.onerror = function () {
@@ -569,23 +938,33 @@
     }
 
     formatSel.addEventListener("change", function () {
-      var next = formatSel.value;
-      var wasExample = !source.value.trim() || source.value === FORMATS[previousFormat].example;
-      setFormat(next, wasExample);
+      var previousExamples = FORMATS[previousFormat].examples;
+      var current = getSource();
+      var wasDemo = current === "" || previousExamples.some(function (example) { return example.code === current; });
+      setFormat(formatSel.value);
+      if (wasDemo) {
+        loadExample(0, false);
+      } else {
+        exampleSel.value = "";
+      }
+      setMode(formatSel.value);
       render();
     });
-    document.getElementById("exampleBtn").addEventListener("click", function () {
-      source.value = FORMATS[formatSel.value].example;
-      setFormat(formatSel.value, false);
-      render();
+
+    exampleSel.addEventListener("change", function () {
+      if (exampleSel.value === "") return;
+      loadExample(Number(exampleSel.value), true);
+      if (editor) editor.focus();
     });
+
     document.getElementById("renderBtn").addEventListener("click", render);
     document.getElementById("clearBtn").addEventListener("click", function () {
-      source.value = "";
+      setSource("");
+      exampleSel.value = "";
       errorEl.textContent = "";
       clearPreview();
       setStatus("muted", "waiting", FORMATS[formatSel.value].label);
-      source.focus();
+      if (editor) editor.focus();
     });
     document.getElementById("copySvgBtn").addEventListener("click", function () {
       var btn = this;
@@ -596,7 +975,9 @@
       Toolkit.download(new Blob([lastSvg], { type: "image/svg+xml" }), lastFormat + ".svg");
     });
     downloadPngBtn.addEventListener("click", downloadPng);
-    source.addEventListener("input", function () { if (liveChk.checked) schedule(); });
+    liveChk.addEventListener("change", function () {
+      if (liveChk.checked && getSource().trim()) render();
+    });
     document.addEventListener("keydown", function (e) {
       if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
         e.preventDefault();
@@ -604,7 +985,22 @@
       }
     });
 
-    setFormat("mermaid", true);
+    var fullscreenBtn = document.getElementById("fullscreenBtn");
+    fullscreenBtn.addEventListener("click", function () {
+      if (!document.fullscreenElement) {
+        var request = document.documentElement.requestFullscreen || document.documentElement.webkitRequestFullscreen;
+        if (request) request.call(document.documentElement).catch(function () {});
+      } else {
+        var exit = document.exitFullscreen || document.webkitExitFullscreen;
+        if (exit) exit.call(document);
+      }
+    });
+    document.addEventListener("fullscreenchange", function () {
+      fullscreenBtn.textContent = document.fullscreenElement ? "Exit fullscreen" : "Fullscreen";
+    });
+
+    setFormat("mermaid");
+    loadExample(0, false);
     setStatus("muted", "rendering…", "Mermaid");
     render();
   </script>
