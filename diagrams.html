@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>diagram renderer</title>
-  <meta name="description" content="Render Mermaid, Graphviz DOT, D2, Nomnoml, WaveDrom, Vega-Lite, Svgbob, Pikchr and js-sequence-diagrams locally in your browser.">
+  <meta name="description" content="Render Mermaid, Graphviz DOT, D2, Nomnoml, WaveDrom, Vega-Lite, ECharts, Markmap, BPMN, Svgbob, Pikchr and js-sequence-diagrams locally in your browser.">
   <script>
     (function () {
       var stored = null;
@@ -18,9 +18,14 @@
   </script>
   <link rel="stylesheet" href="./style.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/lib/codemirror.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bpmn-js@18.6.2/dist/assets/diagram-js.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bpmn-js@18.6.2/dist/assets/bpmn-js.css">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bpmn-js@18.6.2/dist/assets/bpmn-font/css/bpmn-embedded.css">
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/lib/codemirror.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/addon/mode/simple.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/mode/javascript/javascript.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/mode/xml/xml.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/mode/markdown/markdown.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/addon/edit/matchbrackets.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/addon/edit/closebrackets.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/addon/selection/active-line.js"></script>
@@ -265,6 +270,9 @@
           <option value="nomnoml">Nomnoml</option>
           <option value="wavedrom">WaveDrom</option>
           <option value="vega">Vega-Lite</option>
+          <option value="echarts">ECharts</option>
+          <option value="markmap">Markmap</option>
+          <option value="bpmn">BPMN 2.0</option>
           <option value="svgbob">Svgbob</option>
           <option value="pikchr">Pikchr</option>
           <option value="sequence">js-sequence-diagrams</option>
@@ -311,7 +319,7 @@
     </div>
 
     <footer class="app-footer">
-      Mermaid · Graphviz (Viz.js) · D2 · Nomnoml · WaveDrom · Vega-Lite · Svgbob · Pikchr · js-sequence-diagrams.
+      Mermaid · Graphviz (Viz.js) · D2 · Nomnoml · WaveDrom · Vega-Lite · ECharts · Markmap · BPMN · Svgbob · Pikchr · js-sequence-diagrams.
       All rendering is client-side; libraries load from CDNs. PlantUML is omitted because it needs a server.
     </footer>
   </main>
@@ -506,6 +514,67 @@
           }
         ]
       },
+      echarts: {
+        label: "ECharts",
+        hint: "Charts, networks, sankeys and more from an Apache ECharts JSON option.",
+        mode: { name: "javascript", json: true },
+        examples: [
+          {
+            name: "Bar chart",
+            code: "{\n  \"title\": { \"text\": \"Requests by day\" },\n  \"tooltip\": {},\n  \"xAxis\": { \"type\": \"category\", \"data\": [\"Mon\", \"Tue\", \"Wed\", \"Thu\", \"Fri\"] },\n  \"yAxis\": { \"type\": \"value\" },\n  \"series\": [{ \"type\": \"bar\", \"data\": [120, 200, 150, 80, 170] }]\n}"
+          },
+          {
+            name: "Line and area",
+            code: "{\n  \"title\": { \"text\": \"Response time\" },\n  \"tooltip\": { \"trigger\": \"axis\" },\n  \"xAxis\": { \"type\": \"category\", \"data\": [\"09:00\", \"10:00\", \"11:00\", \"12:00\", \"13:00\"] },\n  \"yAxis\": { \"type\": \"value\", \"name\": \"ms\", \"scale\": true },\n  \"series\": [{ \"type\": \"line\", \"smooth\": true, \"areaStyle\": {}, \"data\": [120, 132, 101, 134, 90] }]\n}"
+          },
+          {
+            name: "Pie chart",
+            code: "{\n  \"title\": { \"text\": \"Requests by status\", \"left\": \"center\" },\n  \"tooltip\": { \"trigger\": \"item\" },\n  \"series\": [{\n    \"type\": \"pie\",\n    \"radius\": [\"40%\", \"70%\"],\n    \"data\": [\n      { \"value\": 70, \"name\": \"200\" },\n      { \"value\": 15, \"name\": \"404\" },\n      { \"value\": 5, \"name\": \"500\" },\n      { \"value\": 10, \"name\": \"other\" }\n    ]\n  }]\n}"
+          },
+          {
+            name: "Network graph",
+            code: "{\n  \"title\": { \"text\": \"Service graph\" },\n  \"tooltip\": {},\n  \"series\": [{\n    \"type\": \"graph\",\n    \"layout\": \"circular\",\n    \"symbolSize\": 64,\n    \"roam\": false,\n    \"label\": { \"show\": true, \"color\": \"#fff\", \"fontWeight\": \"bold\" },\n    \"lineStyle\": { \"width\": 2, \"curveness\": 0.15 },\n    \"edgeSymbol\": [\"none\", \"arrow\"],\n    \"edgeSymbolSize\": 12,\n    \"data\": [\n      { \"name\": \"Client\" }, { \"name\": \"API\" },\n      { \"name\": \"Worker\" }, { \"name\": \"DB\" }, { \"name\": \"Cache\" }\n    ],\n    \"links\": [\n      { \"source\": \"Client\", \"target\": \"API\" },\n      { \"source\": \"API\", \"target\": \"Worker\" },\n      { \"source\": \"API\", \"target\": \"Cache\" },\n      { \"source\": \"Worker\", \"target\": \"DB\" }\n    ]\n  }]\n}"
+          },
+          {
+            name: "Sankey flow",
+            code: "{\n  \"title\": { \"text\": \"Request flow\" },\n  \"series\": [{\n    \"type\": \"sankey\",\n    \"nodeGap\": 18,\n    \"lineStyle\": { \"color\": \"gradient\", \"curveness\": 0.5 },\n    \"label\": { \"color\": \"#333\", \"fontSize\": 13 },\n    \"data\": [\n      { \"name\": \"Visit\" }, { \"name\": \"Signup\" },\n      { \"name\": \"Active\" }, { \"name\": \"Churn\" }\n    ],\n    \"links\": [\n      { \"source\": \"Visit\", \"target\": \"Signup\", \"value\": 35 },\n      { \"source\": \"Visit\", \"target\": \"Churn\", \"value\": 65 },\n      { \"source\": \"Signup\", \"target\": \"Active\", \"value\": 28 },\n      { \"source\": \"Signup\", \"target\": \"Churn\", \"value\": 7 }\n    ]\n  }]\n}"
+          }
+        ]
+      },
+      markmap: {
+        label: "Markmap",
+        hint: "Markdown headings and lists rendered as a mind map.",
+        mode: { name: "markdown", xml: true },
+        examples: [
+          {
+            name: "Project mindmap",
+            code: "# Web tools\n## Data\n- JSON\n- YAML\n- CSV\n## Images\n- Palette\n- QR codes\n## Diagrams\n- Mermaid\n- Graphviz\n- ECharts"
+          },
+          {
+            name: "Learning notes",
+            code: "# TypeScript\n## Basics\n- Types\n- Interfaces\n## Advanced\n- Generics\n- Conditional types\n- Template literals\n## Tooling\n- tsconfig\n- ESLint"
+          },
+          {
+            name: "Release plan",
+            code: "# Release 2.0\n## Design\n- Wireframes\n- Prototype\n## Build\n- API\n- UI\n- Tests\n## Launch\n- Docs\n- Announcement"
+          }
+        ]
+      },
+      bpmn: {
+        label: "BPMN 2.0",
+        hint: "Business process diagrams from BPMN 2.0 XML, rendered with bpmn-js.",
+        mode: "xml",
+        examples: [
+          {
+            name: "Simple process",
+            code: "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<bpmn:definitions xmlns:bpmn=\"http://www.omg.org/spec/BPMN/20100524/MODEL\" xmlns:bpmndi=\"http://www.omg.org/spec/BPMN/20100524/DI\" xmlns:dc=\"http://www.omg.org/spec/DD/20100524/DC\" xmlns:di=\"http://www.omg.org/spec/DD/20100524/DI\" id=\"Definitions_1\" targetNamespace=\"http://bpmn.io/schema/bpmn\">\n  <bpmn:process id=\"Process_1\" isExecutable=\"false\">\n    <bpmn:startEvent id=\"StartEvent_1\" />\n    <bpmn:task id=\"Task_1\" name=\"Review request\" />\n    <bpmn:endEvent id=\"EndEvent_1\" />\n    <bpmn:sequenceFlow id=\"Flow_1\" sourceRef=\"StartEvent_1\" targetRef=\"Task_1\" />\n    <bpmn:sequenceFlow id=\"Flow_2\" sourceRef=\"Task_1\" targetRef=\"EndEvent_1\" />\n  </bpmn:process>\n  <bpmndi:BPMNDiagram id=\"BPMNDiagram_1\">\n    <bpmndi:BPMNPlane id=\"BPMNPlane_1\" bpmnElement=\"Process_1\">\n      <bpmndi:BPMNShape id=\"StartEvent_1_di\" bpmnElement=\"StartEvent_1\"><dc:Bounds x=\"152\" y=\"102\" width=\"36\" height=\"36\" /></bpmndi:BPMNShape>\n      <bpmndi:BPMNShape id=\"Task_1_di\" bpmnElement=\"Task_1\"><dc:Bounds x=\"240\" y=\"80\" width=\"100\" height=\"80\" /></bpmndi:BPMNShape>\n      <bpmndi:BPMNShape id=\"EndEvent_1_di\" bpmnElement=\"EndEvent_1\"><dc:Bounds x=\"400\" y=\"102\" width=\"36\" height=\"36\" /></bpmndi:BPMNShape>\n      <bpmndi:BPMNEdge id=\"Flow_1_di\" bpmnElement=\"Flow_1\"><di:waypoint x=\"188\" y=\"120\" /><di:waypoint x=\"240\" y=\"120\" /></bpmndi:BPMNEdge>\n      <bpmndi:BPMNEdge id=\"Flow_2_di\" bpmnElement=\"Flow_2\"><di:waypoint x=\"340\" y=\"120\" /><di:waypoint x=\"400\" y=\"120\" /></bpmndi:BPMNEdge>\n    </bpmndi:BPMNPlane>\n  </bpmndi:BPMNDiagram>\n</bpmn:definitions>"
+          },
+          {
+            name: "Approval flow",
+            code: "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<bpmn:definitions xmlns:bpmn=\"http://www.omg.org/spec/BPMN/20100524/MODEL\" xmlns:bpmndi=\"http://www.omg.org/spec/BPMN/20100524/DI\" xmlns:dc=\"http://www.omg.org/spec/DD/20100524/DC\" xmlns:di=\"http://www.omg.org/spec/DD/20100524/DI\" id=\"Definitions_1\" targetNamespace=\"http://bpmn.io/schema/bpmn\">\n  <bpmn:process id=\"Process_1\" isExecutable=\"false\">\n    <bpmn:startEvent id=\"StartEvent_1\" />\n    <bpmn:task id=\"Task_1\" name=\"Review request\" />\n    <bpmn:exclusiveGateway id=\"Gateway_1\" />\n    <bpmn:endEvent id=\"EndEvent_1\" name=\"Approved\" />\n    <bpmn:endEvent id=\"EndEvent_2\" name=\"Rejected\" />\n    <bpmn:sequenceFlow id=\"Flow_1\" sourceRef=\"StartEvent_1\" targetRef=\"Task_1\" />\n    <bpmn:sequenceFlow id=\"Flow_2\" sourceRef=\"Task_1\" targetRef=\"Gateway_1\" />\n    <bpmn:sequenceFlow id=\"Flow_3\" sourceRef=\"Gateway_1\" targetRef=\"EndEvent_1\" name=\"yes\" />\n    <bpmn:sequenceFlow id=\"Flow_4\" sourceRef=\"Gateway_1\" targetRef=\"EndEvent_2\" name=\"no\" />\n  </bpmn:process>\n  <bpmndi:BPMNDiagram id=\"BPMNDiagram_1\">\n    <bpmndi:BPMNPlane id=\"BPMNPlane_1\" bpmnElement=\"Process_1\">\n      <bpmndi:BPMNShape id=\"StartEvent_1_di\" bpmnElement=\"StartEvent_1\"><dc:Bounds x=\"152\" y=\"122\" width=\"36\" height=\"36\" /></bpmndi:BPMNShape>\n      <bpmndi:BPMNShape id=\"Task_1_di\" bpmnElement=\"Task_1\"><dc:Bounds x=\"240\" y=\"100\" width=\"100\" height=\"80\" /></bpmndi:BPMNShape>\n      <bpmndi:BPMNShape id=\"Gateway_1_di\" bpmnElement=\"Gateway_1\" isMarkerVisible=\"true\"><dc:Bounds x=\"390\" y=\"115\" width=\"50\" height=\"50\" /></bpmndi:BPMNShape>\n      <bpmndi:BPMNShape id=\"EndEvent_1_di\" bpmnElement=\"EndEvent_1\"><dc:Bounds x=\"500\" y=\"70\" width=\"36\" height=\"36\" /></bpmndi:BPMNShape>\n      <bpmndi:BPMNShape id=\"EndEvent_2_di\" bpmnElement=\"EndEvent_2\"><dc:Bounds x=\"500\" y=\"170\" width=\"36\" height=\"36\" /></bpmndi:BPMNShape>\n      <bpmndi:BPMNEdge id=\"Flow_1_di\" bpmnElement=\"Flow_1\"><di:waypoint x=\"188\" y=\"140\" /><di:waypoint x=\"240\" y=\"140\" /></bpmndi:BPMNEdge>\n      <bpmndi:BPMNEdge id=\"Flow_2_di\" bpmnElement=\"Flow_2\"><di:waypoint x=\"340\" y=\"140\" /><di:waypoint x=\"390\" y=\"140\" /></bpmndi:BPMNEdge>\n      <bpmndi:BPMNEdge id=\"Flow_3_di\" bpmnElement=\"Flow_3\"><di:waypoint x=\"440\" y=\"115\" /><di:waypoint x=\"440\" y=\"88\" /><di:waypoint x=\"500\" y=\"88\" /></bpmndi:BPMNEdge>\n      <bpmndi:BPMNEdge id=\"Flow_4_di\" bpmnElement=\"Flow_4\"><di:waypoint x=\"440\" y=\"165\" /><di:waypoint x=\"440\" y=\"188\" /><di:waypoint x=\"500\" y=\"188\" /></bpmndi:BPMNEdge>\n    </bpmndi:BPMNPlane>\n  </bpmndi:BPMNDiagram>\n</bpmn:definitions>"
+          }
+        ]
+      },
       svgbob: {
         label: "Svgbob",
         hint: "Turn ASCII art diagrams into clean SVG paths.",
@@ -589,6 +658,8 @@
           { label: "Messages over time", desc: "Sequence diagrams and conversations", visual: "sequence", next: "sequence" },
           { label: "Classes or data models", desc: "UML classes, entities and state", visual: "class", next: "model" },
           { label: "Data or metrics", desc: "Bar, line and scatter charts", visual: "chart", next: "data" },
+          { label: "A business process", desc: "BPMN process or approval workflow", visual: "flow", next: "bpmn" },
+          { label: "A mindmap or outline", desc: "Markdown notes or a hierarchical idea map", visual: "tree", next: "mindmap" },
           { label: "A schedule or history", desc: "Gantt charts, timelines and journeys", visual: "timeline", next: "time" },
           { label: "Signals or ASCII art", desc: "Timing waveforms, ASCII boxes and PIC-style blocks", visual: "wave", next: "lowlevel" },
           { label: "Show every format", desc: "Browse one sample from every renderer", visual: "tree", next: "all" }
@@ -624,13 +695,33 @@
           { label: "State machine", desc: "States, transitions and events", visual: "flow", result: { format: "mermaid", example: "State machine", why: "Mermaid state diagrams make transition labels and terminal states easy to read." } }
         ]
       },
+      bpmn: {
+        title: "Which BPMN example fits?",
+        subtitle: "BPMN is the formal choice for executable or shareable business processes.",
+        options: [
+          { label: "Simple process", desc: "Start, task and end", visual: "flow", result: { format: "bpmn", example: "Simple process", why: "BPMN 2.0 is the standard format for business processes and can be opened in BPMN tools." } },
+          { label: "Approval flow", desc: "Gateway with yes/no outcomes", visual: "flow", result: { format: "bpmn", example: "Approval flow", why: "BPMN gateways and sequence flows express approval decisions unambiguously." } }
+        ]
+      },
+      mindmap: {
+        title: "How should the ideas be arranged?",
+        subtitle: "Markdown mindmaps are great for notes; Mermaid mindmaps use explicit structure.",
+        options: [
+          { label: "Markdown mindmap", desc: "Headings and bullet lists", visual: "tree", result: { format: "markmap", example: "Project mindmap", why: "Markmap turns ordinary Markdown headings and lists into a radial mind map." } },
+          { label: "Release outline", desc: "A structured plan from Markdown", visual: "timeline", result: { format: "markmap", example: "Release plan", why: "Markmap keeps planning notes readable as Markdown while showing their hierarchy." } },
+          { label: "Mermaid mindmap", desc: "Explicit mindmap syntax", visual: "tree", result: { format: "mermaid", example: "Mindmap", why: "Mermaid's mindmap syntax gives you more control over the node tree." } }
+        ]
+      },
       data: {
         title: "What shape is the data?",
         subtitle: "Vega-Lite renders charts from a JSON specification.",
         options: [
           { label: "Compare categories", desc: "Bar chart", visual: "chart", result: { format: "vega", example: "Bar chart", why: "Vega-Lite is a good fit for declarative charts driven by structured data." } },
           { label: "Change over time", desc: "Line chart", visual: "chart", result: { format: "vega", example: "Line chart", why: "A line chart makes trends and time series easy to scan." } },
-          { label: "Relationship between values", desc: "Scatter plot", visual: "chart", result: { format: "vega", example: "Scatter plot", why: "Scatter plots reveal correlations and outliers in numeric data." } }
+          { label: "Relationship between values", desc: "Scatter plot", visual: "chart", result: { format: "vega", example: "Scatter plot", why: "Scatter plots reveal correlations and outliers in numeric data." } },
+          { label: "Part-to-whole", desc: "Pie or donut chart", visual: "chart", result: { format: "echarts", example: "Pie chart", why: "ECharts is a strong general charting library with built-in pie, graph and sankey series." } },
+          { label: "Network relationships", desc: "Nodes and links", visual: "tree", result: { format: "echarts", example: "Network graph", why: "ECharts' graph series handles force-directed network diagrams from JSON." } },
+          { label: "Flow quantities", desc: "Sankey diagram", visual: "flow", result: { format: "echarts", example: "Sankey flow", why: "ECharts renders Sankey diagrams for flows between stages." } }
         ]
       },
       time: {
@@ -663,6 +754,9 @@
           { label: "Nomnoml", desc: "Class sketch", visual: "class", result: { format: "nomnoml", example: "Class diagram", why: "Nomnoml is a compact UML renderer." } },
           { label: "WaveDrom", desc: "Timing waveform", visual: "wave", result: { format: "wavedrom", example: "Bus transaction", why: "WaveDrom renders WaveJSON timing diagrams." } },
           { label: "Vega-Lite", desc: "Bar chart", visual: "chart", result: { format: "vega", example: "Bar chart", why: "Vega-Lite renders charts from JSON." } },
+          { label: "ECharts", desc: "Network graph", visual: "tree", result: { format: "echarts", example: "Network graph", why: "ECharts renders many chart and network types from JSON." } },
+          { label: "Markmap", desc: "Markdown mindmap", visual: "tree", result: { format: "markmap", example: "Project mindmap", why: "Markmap renders Markdown headings and lists as a mind map." } },
+          { label: "BPMN 2.0", desc: "Approval flow", visual: "flow", result: { format: "bpmn", example: "Approval flow", why: "bpmn-js renders BPMN 2.0 process diagrams from XML." } },
           { label: "Svgbob", desc: "ASCII boxes", visual: "ascii", result: { format: "svgbob", example: "Boxes", why: "Svgbob turns ASCII art into SVG." } },
           { label: "Pikchr", desc: "PIC-style blocks", visual: "flow", result: { format: "pikchr", example: "Box flow", why: "Pikchr is a PIC-like block diagram language." } },
           { label: "js-sequence-diagrams", desc: "Conversation", visual: "sequence", result: { format: "sequence", example: "Basic conversation", why: "js-sequence-diagrams is a small, focused sequence renderer." } }
@@ -689,6 +783,10 @@
     var bobPromise = null;
     var pikchrPromise = null;
     var sequencePromise = null;
+    var echartsPromise = null;
+    var markmapPromise = null;
+    var bpmnPromise = null;
+    var bpmnCssPromise = null;
 
     if (window.CodeMirror) {
       CodeMirror.defineSimpleMode("mermaid", {
@@ -937,6 +1035,62 @@
       return pikchrPromise;
     }
 
+    function getBpmn() {
+      if (!bpmnPromise) {
+        bpmnPromise = loadScript("https://cdn.jsdelivr.net/npm/bpmn-js@18.6.2/dist/bpmn-viewer.production.min.js", "BpmnJS")
+          .catch(function (e) {
+            bpmnPromise = null;
+            throw new Error("Could not load BPMN viewer: " + (e && e.message ? e.message : String(e)));
+          });
+      }
+      return bpmnPromise;
+    }
+
+    function getBpmnCss() {
+      if (!bpmnCssPromise) {
+        var base = "https://cdn.jsdelivr.net/npm/bpmn-js@18.6.2/dist/assets/";
+        var files = ["diagram-js.css", "bpmn-js.css", "bpmn-font/css/bpmn-embedded.css"];
+        bpmnCssPromise = Promise.all(files.map(function (file) {
+          return fetch(base + file).then(function (response) {
+            if (!response.ok) throw new Error("HTTP " + response.status + " for " + file);
+            return response.text();
+          });
+        })).then(function (parts) {
+          return parts.join("\n").replace(/url\((['"]?)\.\.\/font\//g, "url($1" + base + "bpmn-font/font/");
+        }).catch(function (e) {
+          bpmnCssPromise = null;
+          throw new Error("Could not load BPMN styles: " + (e && e.message ? e.message : String(e)));
+        });
+      }
+      return bpmnCssPromise;
+    }
+
+    function getECharts() {
+      if (!echartsPromise) {
+        echartsPromise = loadScript("https://cdn.jsdelivr.net/npm/echarts@5.6.0/dist/echarts.min.js", "echarts")
+          .catch(function (e) {
+            echartsPromise = null;
+            throw new Error("Could not load ECharts: " + (e && e.message ? e.message : String(e)));
+          });
+      }
+      return echartsPromise;
+    }
+
+    function getMarkmap() {
+      if (!markmapPromise) {
+        markmapPromise = Promise.all([
+          import("https://esm.sh/markmap-lib@0.18.12"),
+          import("https://esm.sh/markmap-view@0.18.12")
+        ]).then(function (modules) {
+          return { lib: modules[0], view: modules[1] };
+        }).catch(function (e) {
+          markmapPromise = null;
+          throw new Error("Could not load Markmap: " + (e && e.message ? e.message : String(e)));
+        });
+      }
+      return markmapPromise;
+    }
+
     function getSequence() {
       if (!sequencePromise) {
         sequencePromise = loadScript("https://cdn.jsdelivr.net/npm/underscore@1.13.6/underscore-umd-min.js", "_")
@@ -1064,6 +1218,134 @@
       return pikchr.render(text);
     }
 
+    async function renderBpmn(text) {
+      var BpmnJS = await getBpmn();
+      var css = await getBpmnCss();
+      var stage = document.createElement("div");
+      stage.style.position = "fixed";
+      stage.style.left = "-100000px";
+      stage.style.top = "0";
+      stage.style.width = "900px";
+      stage.style.height = "600px";
+      stage.style.background = "#fff";
+      document.body.appendChild(stage);
+      var viewer = new BpmnJS({ container: stage });
+      try {
+        await viewer.importXML(text);
+        viewer.get("canvas").zoom("fit-viewport");
+        await new Promise(function (resolve) { setTimeout(resolve, 350); });
+        var svg = stage.querySelector("svg");
+        if (!svg) throw new Error("BPMN viewer did not produce an SVG.");
+        var bounds = svg.getBBox();
+        var clone = svg.cloneNode(true);
+        // bpmn-js draws into a 900x600 canvas but does not scale small
+        // diagrams, so crop to the real bounds and let the viewBox scale.
+        var pad = 20;
+        var vbWidth = Math.max(1, Math.ceil(bounds.width + pad * 2));
+        var vbHeight = Math.max(1, Math.ceil(bounds.height + pad * 2));
+        clone.setAttribute("viewBox", Math.floor(bounds.x - pad) + " " + Math.floor(bounds.y - pad) + " " + vbWidth + " " + vbHeight);
+        // Cap the upscale at 2x so BPMN's fixed-width strokes stay crisp.
+        var outWidth = Math.min(900, Math.max(480, vbWidth * 2));
+        var outHeight = Math.round(outWidth * vbHeight / vbWidth);
+        if (outHeight > 700) {
+          outHeight = 700;
+          outWidth = Math.round(outHeight * vbWidth / vbHeight);
+        }
+        clone.setAttribute("width", outWidth);
+        clone.setAttribute("height", outHeight);
+        clone.setAttribute("preserveAspectRatio", "xMidYMid meet");
+        clone.setAttribute("class", ((clone.getAttribute("class") || "") + " djs-parent bjs-container").trim());
+        var style = document.createElementNS("http://www.w3.org/2000/svg", "style");
+        style.textContent = css;
+        clone.insertBefore(style, clone.firstChild);
+        return clone.outerHTML;
+      } finally {
+        viewer.destroy();
+        stage.remove();
+      }
+    }
+
+    async function renderECharts(text) {
+      var echarts = await getECharts();
+      var option = JSON.parse(text);
+      option.animation = false;
+      var stage = document.createElement("div");
+      stage.style.position = "fixed";
+      stage.style.left = "-100000px";
+      stage.style.top = "0";
+      stage.style.width = "900px";
+      stage.style.height = "600px";
+      document.body.appendChild(stage);
+      var chart;
+      try {
+        chart = echarts.init(stage, null, { renderer: "svg", width: 900, height: 600 });
+        chart.setOption(option);
+        await new Promise(function (resolve) { setTimeout(resolve, 250); });
+        var svg = stage.querySelector("svg");
+        if (!svg) throw new Error("ECharts did not produce an SVG.");
+        // ECharts positions its root SVG absolutely for its own container.
+        // Strip that so the exported SVG can be embedded anywhere.
+        svg.removeAttribute("style");
+        svg.setAttribute("width", "900");
+        svg.setAttribute("height", "600");
+        if (!svg.getAttribute("viewBox")) svg.setAttribute("viewBox", "0 0 900 600");
+        return svg.outerHTML;
+      } finally {
+        if (chart) chart.dispose();
+        stage.remove();
+      }
+    }
+
+    async function renderMarkmap(text) {
+      var modules = await getMarkmap();
+      var transformer = new modules.lib.Transformer();
+      var root = transformer.transform(text).root;
+      var stage = document.createElement("div");
+      stage.style.position = "fixed";
+      stage.style.left = "-100000px";
+      stage.style.top = "0";
+      stage.style.width = "900px";
+      stage.style.height = "600px";
+      stage.style.background = "#fff";
+      document.body.appendChild(stage);
+      var svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      svg.setAttribute("width", "900");
+      svg.setAttribute("height", "600");
+      stage.appendChild(svg);
+      var map;
+      try {
+        map = modules.view.Markmap.create(svg, { autoFit: false, duration: 0 }, root);
+        await new Promise(function (resolve) { setTimeout(resolve, 400); });
+        // Markmap measures label sizes on the first pass, before fonts and
+        // layout settle, and its own fit() can then scale past the canvas.
+        // Re-render once, drop the zoom transform and derive a viewBox from
+        // the real content bounds so the map always fits its container.
+        await map.setData();
+        await new Promise(function (resolve) { setTimeout(resolve, 250); });
+        var content = svg.querySelector("g");
+        if (content) content.removeAttribute("transform");
+        var bounds = svg.getBBox();
+        var pad = 16;
+        var vbWidth = Math.ceil(bounds.width + pad * 2) || 900;
+        var vbHeight = Math.ceil(bounds.height + pad * 2) || 600;
+        svg.setAttribute("viewBox", Math.floor(bounds.x - pad) + " " + Math.floor(bounds.y - pad) + " " + vbWidth + " " + vbHeight);
+        // Scale small maps up so they use the available width like the other formats.
+        var outWidth = 900;
+        var outHeight = Math.round(outWidth * vbHeight / vbWidth);
+        if (outHeight > 700) {
+          outHeight = 700;
+          outWidth = Math.round(outHeight * vbWidth / vbHeight);
+        }
+        svg.setAttribute("width", outWidth);
+        svg.setAttribute("height", outHeight);
+        svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
+        return svg.outerHTML;
+      } finally {
+        if (map && map.destroy) map.destroy();
+        stage.remove();
+      }
+    }
+
     async function renderSequence(text, seq) {
       await getSequence();
       var stage = document.createElement("div");
@@ -1089,6 +1371,9 @@
       if (format === "nomnoml") return renderNomnoml(text);
       if (format === "wavedrom") return renderWaveDrom(text, seq);
       if (format === "vega") return renderVega(text);
+      if (format === "echarts") return renderECharts(text);
+      if (format === "markmap") return renderMarkmap(text);
+      if (format === "bpmn") return renderBpmn(text);
       if (format === "svgbob") return renderSvgbob(text);
       if (format === "pikchr") return renderPikchr(text);
       if (format === "sequence") return renderSequence(text, seq);
@@ -1102,9 +1387,13 @@
     }
 
     function setActions(enabled) {
+      var svgOnly = lastFormat === "markmap" || lastFormat === "bpmn";
       downloadSvgBtn.disabled = !enabled;
-      downloadPngBtn.disabled = !enabled;
       copySvgBtn.disabled = !enabled;
+      downloadPngBtn.disabled = !enabled || svgOnly;
+      downloadPngBtn.title = svgOnly
+        ? "This format uses styles/HTML that do not rasterize reliably; export SVG instead"
+        : "Download PNG";
     }
 
     function clearPreview() {
