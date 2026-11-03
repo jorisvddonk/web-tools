@@ -127,6 +127,50 @@
     }
     .modal-backdrop[hidden] { display: none; }
     body.modal-open { overflow: hidden !important; }
+    .drop-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 150;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      background: rgba(0, 0, 0, 0.5);
+      padding: 1.5rem;
+    }
+    .drop-overlay.show { display: flex; }
+    .drop-card {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      max-width: 28rem;
+      padding: 1.6rem 2rem;
+      border: 2px dashed var(--accent);
+      border-radius: 14px;
+      background: var(--card);
+      color: var(--fg);
+      text-align: center;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35);
+    }
+    .drop-card span { color: var(--muted); font-size: 0.85rem; }
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 1.4rem;
+      transform: translate(-50%, 0.5rem);
+      z-index: 200;
+      max-width: min(90vw, 34rem);
+      padding: 0.6rem 0.95rem;
+      border-radius: 9px;
+      background: #1f2937;
+      color: #f9fafb;
+      font-size: 0.85rem;
+      line-height: 1.35;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.35);
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.18s ease, transform 0.18s ease;
+    }
+    .toast.show { opacity: 1; transform: translate(-50%, 0); }
     .modal {
       width: min(980px, 100%);
       max-height: 90vh;
@@ -294,6 +338,8 @@
           <span class="hint" id="editorHint">syntax highlighting active</span>
           <span class="spacer"></span>
           <label class="hint" style="display:flex;align-items:center;gap:0.3rem"><input type="checkbox" id="liveChk" checked> Live</label>
+          <button id="openBtn" type="button" class="secondary" title="Open a diagram source file or an exported SVG/PNG">Open…</button>
+          <input id="fileInput" type="file" hidden accept=".svg,.png,.txt,.mmd,.dot,.gv,.json,.md,.xml,.d2,.pikchr,.seq,image/svg+xml,image/png,text/plain">
           <button id="renderBtn" type="button">Render</button>
           <button id="clearBtn" type="button" class="secondary">Clear</button>
         </div>
@@ -337,6 +383,14 @@
       <div id="recResult" hidden></div>
     </div>
   </div>
+
+  <div class="drop-overlay" id="dropOverlay">
+    <div class="drop-card">
+      <strong>Drop to load</strong>
+      <span>An exported SVG or PNG restores its embedded source. Source files are detected automatically.</span>
+    </div>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
   <script src="./toolkit.js"></script>
   <script>
@@ -1430,6 +1484,7 @@
         if (seq !== renderSeq) return;
         if (!svg || typeof svg !== "string") throw new Error("The renderer returned no SVG.");
         svg = sanitizeSvg(svg);
+        svg = embedSource(svg, format, text);
         lastSvg = svg;
         lastFormat = format;
         preview.innerHTML = svg;
@@ -1507,8 +1562,13 @@
         ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
         try {
           canvas.toBlob(function (png) {
-            if (png) Toolkit.download(png, lastFormat + ".png");
-            else errorEl.textContent = "PNG export failed; use SVG instead.";
+            if (png) {
+              embedPngSource(png, lastFormat, getSource()).then(function (withSource) {
+                Toolkit.download(withSource, lastFormat + ".png");
+              });
+            } else {
+              errorEl.textContent = "PNG export failed; use SVG instead.";
+            }
             URL.revokeObjectURL(url);
           }, "image/png");
         } catch (e) {
@@ -1810,6 +1870,399 @@
       render();
       if (editor) editor.focus();
     }
+
+    // ---------------------------------------------------------------------
+    // Portable diagrams: embed the source in exports, load it back, detect
+    // the format of pasted/dropped text and files.
+    // ---------------------------------------------------------------------
+
+    var toastTimer = null;
+    function toast(message) {
+      var host = document.getElementById("toast");
+      if (!host) return;
+      host.textContent = message;
+      host.classList.add("show");
+      clearTimeout(toastTimer);
+      toastTimer = setTimeout(function () { host.classList.remove("show"); }, 3600);
+    }
+
+    function escapeXmlText(value) {
+      return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;");
+    }
+
+    // Every exported SVG carries its source in a <metadata> element.
+    function embedSource(svg, format, source) {
+      if (!svg || svg.indexOf('id="webtools-source"') !== -1) return svg;
+      var meta = '<metadata id="webtools-source" data-format="' + escapeXmlText(format) +
+        '" data-tool="web-tools">' + escapeXmlText(source) + "</metadata>";
+      return svg.replace(/(<svg\b[^>]*>)/, function (match) { return match + meta; });
+    }
+
+    function readSvgSource(text) {
+      try {
+        var doc = new DOMParser().parseFromString(text, "image/svg+xml");
+        if (!doc || !doc.documentElement || doc.querySelector("parsererror")) return null;
+        var node = doc.querySelector('metadata[id="webtools-source"]') ||
+          doc.querySelector("metadata[data-format]");
+        if (!node) return null;
+        var format = node.getAttribute("data-format");
+        var source = node.textContent || "";
+        if (!format || !FORMATS[format] || !source.trim()) return null;
+        return { format: format, source: source };
+      } catch (e) {
+        return null;
+      }
+    }
+
+    // PNG text chunks let us round-trip the source through exported PNGs.
+    var PNG_KEYWORD = "webtools-source";
+    var crcTable = null;
+    function crc32(bytes) {
+      if (!crcTable) {
+        crcTable = new Uint32Array(256);
+        for (var n = 0; n < 256; n++) {
+          var c = n;
+          for (var k = 0; k < 8; k++) c = (c & 1) ? (0xedb88320 ^ (c >>> 1)) : (c >>> 1);
+          crcTable[n] = c >>> 0;
+        }
+      }
+      var crc = 0xffffffff;
+      for (var i = 0; i < bytes.length; i++) crc = crcTable[(crc ^ bytes[i]) & 0xff] ^ (crc >>> 8);
+      return (crc ^ 0xffffffff) >>> 0;
+    }
+
+    function pngChunk(type, data) {
+      var out = new Uint8Array(12 + data.length);
+      var view = new DataView(out.buffer);
+      view.setUint32(0, data.length);
+      for (var i = 0; i < 4; i++) out[4 + i] = type.charCodeAt(i);
+      out.set(data, 8);
+      view.setUint32(8 + data.length, crc32(out.subarray(4, 8 + data.length)));
+      return out;
+    }
+
+    function pngTextChunk(text) {
+      var encoder = new TextEncoder();
+      var keyword = encoder.encode(PNG_KEYWORD);
+      var body = encoder.encode(text);
+      // keyword \0 flag(0) method(0) language \0 translated \0 text
+      var separators = new Uint8Array([0, 0, 0, 0, 0]);
+      var data = new Uint8Array(keyword.length + separators.length + body.length);
+      data.set(keyword, 0);
+      data.set(separators, keyword.length);
+      data.set(body, keyword.length + separators.length);
+      return pngChunk("iTXt", data);
+    }
+
+    function findPngChunk(bytes, wanted) {
+      var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      var offset = 8;
+      while (offset + 12 <= bytes.length) {
+        var length = view.getUint32(offset);
+        var type = String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
+        if (type === wanted) return offset;
+        if (type === "IEND") return -1;
+        offset += 12 + length;
+      }
+      return -1;
+    }
+
+    function readPngSource(buffer) {
+      try {
+        var bytes = new Uint8Array(buffer);
+        if (bytes.length < 8 || bytes[1] !== 0x50 || bytes[2] !== 0x4e || bytes[3] !== 0x47) return null;
+        var view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+        var offset = 8;
+        while (offset + 12 <= bytes.length) {
+          var length = view.getUint32(offset);
+          var type = String.fromCharCode(bytes[offset + 4], bytes[offset + 5], bytes[offset + 6], bytes[offset + 7]);
+          if (type === "IEND") break;
+          if (type === "iTXt" || type === "tEXt") {
+            var data = bytes.subarray(offset + 8, offset + 8 + length);
+            var separator = data.indexOf(0);
+            var keyword = String.fromCharCode.apply(null, Array.prototype.slice.call(data.subarray(0, separator)));
+            if (keyword === PNG_KEYWORD) {
+              var rest = data.subarray(separator + 1);
+              var text;
+              if (type === "tEXt") {
+                text = new TextDecoder("latin1").decode(rest);
+              } else {
+                // flag, method, language \0, translated \0, text
+                var p = 2;
+                var languageEnd = rest.indexOf(0, p);
+                p = languageEnd + 1;
+                var translatedEnd = rest.indexOf(0, p);
+                p = translatedEnd + 1;
+                text = new TextDecoder("utf-8").decode(rest.subarray(p));
+              }
+              var payload = JSON.parse(text);
+              if (payload && FORMATS[payload.format] && typeof payload.source === "string") {
+                return { format: payload.format, source: payload.source };
+              }
+            }
+          }
+          offset += 12 + length;
+        }
+      } catch (e) {
+        return null;
+      }
+      return null;
+    }
+
+    function embedPngSource(blob, format, source) {
+      return blob.arrayBuffer().then(function (buffer) {
+        var bytes = new Uint8Array(buffer);
+        var end = findPngChunk(bytes, "IEND");
+        if (end < 0) return blob;
+        var chunk = pngTextChunk(JSON.stringify({ format: format, source: source }));
+        var out = new Uint8Array(bytes.length + chunk.length);
+        out.set(bytes.subarray(0, end), 0);
+        out.set(chunk, end);
+        out.set(bytes.subarray(end), end + chunk.length);
+        return new Blob([out], { type: "image/png" });
+      }).catch(function () { return blob; });
+    }
+
+    // Heuristic format detection used for pasted and dropped text.
+    function detectFormat(text) {
+      var raw = String(text == null ? "" : text);
+      var t = raw.trim();
+      if (!t) return null;
+      var scores = {};
+      var reasons = {};
+      function add(format, weight, reason) {
+        if (!FORMATS[format]) return;
+        scores[format] = (scores[format] || 0) + weight;
+        if (reason && !reasons[format]) reasons[format] = reason;
+      }
+
+      var json = null;
+      if (/^[\[{]/.test(t)) {
+        try { json = JSON.parse(t); } catch (e) { json = null; }
+      }
+      if (json && typeof json === "object") {
+        var schema = typeof json.$schema === "string" ? json.$schema : "";
+        if (/vega-lite/i.test(schema)) add("vega", 14, "Vega-Lite schema");
+        if (/vega/i.test(schema) && !/vega-lite/i.test(schema)) add("vega", 12, "Vega schema");
+        var signal = json.signal || json.head && json.head.signal;
+        if (Array.isArray(signal) && signal.some(function (item) { return item && item.wave; })) {
+          add("wavedrom", 14, "WaveJSON signal");
+        }
+        if (Array.isArray(json.series) || json.series) {
+          add("echarts", 12, "ECharts series");
+          if (json.xAxis || json.yAxis || json.grid || json.tooltip) add("echarts", 3, "ECharts axes");
+        }
+        if (json.encoding && (json.mark || json.data || json.$schema)) add("vega", 12, "Vega-Lite mark/encoding");
+        else if (json.encoding) add("vega", 6, "Vega-Lite encoding");
+      } else if (/^[\[{]/.test(t)) {
+        if (/"series"\s*:/.test(t)) add("echarts", 8, "ECharts series");
+        if (/"wave"\s*:/.test(t)) add("wavedrom", 8, "WaveJSON wave");
+        if (/"encoding"\s*:/.test(t) && /"mark"\s*:/.test(t)) add("vega", 8, "Vega-Lite mark");
+      }
+
+      if (/<bpmn:definitions/i.test(t) || /<bpmn:process/i.test(t)) add("bpmn", 16, "BPMN XML");
+      else if (/<\?xml/i.test(t) && /<definitions/i.test(t)) add("bpmn", 10, "XML definitions");
+
+      if (/^\s*(?:strict\s+)?(?:di)?graph\s+[^\{]*\{/im.test(t)) add("dot", 13, "DOT graph");
+      if (/^\s*subgraph\s+/im.test(t)) add("dot", 4, "DOT subgraph");
+
+      if (/^\s*(?:flowchart|graph)\s+(?:TB|TD|BT|RL|LR)\b/im.test(t)) add("mermaid", 12, "Mermaid flowchart");
+      if (/^\s*(?:sequenceDiagram|classDiagram|classDiagram-v2|stateDiagram|stateDiagram-v2|erDiagram|gantt|pie|gitGraph|mindmap|timeline|journey|quadrantChart|requirementDiagram|C4Context)\b/im.test(t)) {
+        add("mermaid", 13, "Mermaid diagram keyword");
+      }
+      if (/^\s*(?:subgraph|participant|actor|loop|alt|else|opt|par|rect)\b/im.test(t)) add("mermaid", 4, "Mermaid block keyword");
+      if (/-->>|->>|--x|--\)|\.\.>>?/.test(t)) add("mermaid", 5, "Mermaid arrows");
+      if (/%%\{/.test(t)) add("mermaid", 3, "Mermaid init directive");
+
+      var bareArrows = t.match(/^\s*[\w.$" ]+\s*-+>\s*[\w.$" ]+\s*:\s*\S+/gim);
+      if (bareArrows && bareArrows.length) add("sequence", 8 + Math.min(4, bareArrows.length - 1), "sequence messages");
+      if (/^\s*(?:title|participant)\s+\S+/im.test(t) && bareArrows) add("sequence", 3, "sequence header");
+
+      var headings = t.match(/^\s*#{1,6}\s+\S+/gm);
+      var bullets = t.match(/^\s*[-*+]\s+\S+/gm);
+      if (headings && headings.length) add("markmap", 8 + Math.min(4, headings.length - 1), "Markdown headings");
+      if (headings && bullets) add("markmap", 4, "Markdown outline");
+      if (!headings && bullets && bullets.length > 3 && !/->/.test(t)) add("markmap", 5, "Markdown list");
+
+      if (/^\s*\[[^\]\n]+\]\s*[-<|]/m.test(t)) add("nomnoml", 8, "nomnoml boxes");
+      if (/^#\w[\w-]*\s*:/m.test(t)) add("nomnoml", 6, "nomnoml directives");
+
+      if (/^\s*direction\s*:\s*(?:right|left|up|down)\b/im.test(t)) add("d2", 9, "D2 direction");
+      if (/^\s*[\w.-]+\s*->\s*[\w.-]+\s*:/m.test(t)) add("d2", 5, "D2 connection label");
+      if (/\bshape\s*:\s*\w+/i.test(t)) add("d2", 6, "D2 shape");
+      if (/\bstyle\s*:\s*\{/i.test(t)) add("d2", 4, "D2 style block");
+
+      var svgbobLines = t.match(/^[ \t]*(?:\+-+|--+>|[|+][-+| ]{3,})/gm);
+      if (svgbobLines && svgbobLines.length > 1) add("svgbob", 10, "ASCII box drawing");
+
+      var pikchrWords = (t.match(/\b(?:box|circle|ellipse|cylinder|arrow|line|spline|move|dot|boxwid|boxht|radius|chop)\b/gi) || []).length;
+      if (pikchrWords >= 2 && /"/.test(t) && !/^\s*\[/m.test(t)) add("pikchr", 6 + Math.min(5, pikchrWords), "Pikchr primitives");
+      if (/\bfit\b/.test(t) && pikchrWords >= 1) add("pikchr", 3, "Pikchr fit");
+      if (/\bthickness\b|\bfill\s+\w+|\bcolor\s+\w+/i.test(t) && pikchrWords >= 1) add("pikchr", 2, "Pikchr attributes");
+
+      var best = null;
+      Object.keys(scores).forEach(function (format) {
+        if (!best || scores[format] > scores[best]) best = format;
+      });
+      if (!best) return null;
+      return { format: best, score: scores[best], reason: reasons[best] || "", scores: scores };
+    }
+
+    function applyImported(format, source, message) {
+      if (!FORMATS[format] || typeof source !== "string") return false;
+      formatSel.value = format;
+      setFormat(format);
+      setSource(source);
+      var index = FORMATS[format].examples.findIndex(function (example) { return example.code === source; });
+      exampleSel.value = index >= 0 ? String(index) : "";
+      saveStateNow();
+      render();
+      if (message) toast(message);
+      if (editor) editor.focus();
+      return true;
+    }
+
+    function importDetectedText(text, origin) {
+      var detected = detectFormat(text);
+      if (!detected) {
+        toast("Could not recognise a diagram format in that text.");
+        return false;
+      }
+      var label = FORMATS[detected.format].label;
+      return applyImported(detected.format, text,
+        "Detected " + label + (origin ? " in " + origin : ""));
+    }
+
+    function importFile(file) {
+      if (!file) return Promise.resolve(false);
+      var name = (file.name || "").toLowerCase();
+      var type = (file.type || "").toLowerCase();
+      if (/svg/.test(type) || /\.svg$/.test(name)) {
+        return file.text().then(function (text) {
+          var found = readSvgSource(text);
+          if (!found) { toast("That SVG has no embedded diagram source; export from this tool to include it."); return false; }
+          return applyImported(found.format, found.source, "Loaded embedded source from " + (file.name || "SVG"));
+        });
+      }
+      if (/png/.test(type) || /\.png$/.test(name)) {
+        return file.arrayBuffer().then(function (buffer) {
+          var found = readPngSource(buffer);
+          if (!found) { toast("That PNG has no embedded diagram source; export from this tool to include it."); return false; }
+          return applyImported(found.format, found.source, "Loaded embedded source from " + (file.name || "PNG"));
+        });
+      }
+      return file.text().then(function (text) {
+        return importDetectedText(text, file.name || "that file");
+      });
+    }
+
+    function importDroppedFiles(files) {
+      var list = Array.prototype.slice.call(files || []);
+      if (!list.length) return;
+      importFile(list[0]);
+    }
+
+    var dragDepth = 0;
+    var dropOverlay = document.getElementById("dropOverlay");
+    function dragTypes(event) {
+      var types = event.dataTransfer && event.dataTransfer.types;
+      if (!types) return [];
+      return Array.prototype.slice.call(types);
+    }
+    function isDraggingFiles(event) {
+      return dragTypes(event).indexOf("Files") !== -1;
+    }
+    function insideEditor(target) {
+      return !!(target && target.closest && (target.closest(".CodeMirror") || target.closest("#source")));
+    }
+    function wantsDrop(event) {
+      if (!event.dataTransfer) return false;
+      if (isDraggingFiles(event)) return true;
+      return dragTypes(event).indexOf("text/plain") !== -1 && !insideEditor(event.target);
+    }
+    function hideDropOverlay() {
+      dragDepth = 0;
+      dropOverlay.classList.remove("show");
+    }
+    window.addEventListener("dragenter", function (event) {
+      if (!wantsDrop(event)) return;
+      event.preventDefault();
+      dragDepth++;
+      dropOverlay.classList.add("show");
+    });
+    window.addEventListener("dragover", function (event) {
+      if (!wantsDrop(event)) return;
+      event.preventDefault();
+      if (event.dataTransfer) event.dataTransfer.dropEffect = "copy";
+    });
+    window.addEventListener("dragleave", function () {
+      if (!dragDepth) return;
+      dragDepth = Math.max(0, dragDepth - 1);
+      if (!dragDepth) dropOverlay.classList.remove("show");
+    });
+    window.addEventListener("dragend", hideDropOverlay);
+    window.addEventListener("blur", hideDropOverlay);
+    document.addEventListener("visibilitychange", function () {
+      if (document.hidden) hideDropOverlay();
+    });
+    window.addEventListener("drop", function (event) {
+      var data = event.dataTransfer;
+      if (!data) return;
+      var files = data.files && data.files.length ? data.files : null;
+      var text = !files && data.getData ? data.getData("text/plain") : "";
+      if (!files && (!text || insideEditor(event.target))) { hideDropOverlay(); return; }
+      event.preventDefault();
+      hideDropOverlay();
+      if (files) {
+        importDroppedFiles(files);
+        return;
+      }
+      if (text && text.trim()) importDetectedText(text, "dropped text");
+    });
+
+    document.getElementById("openBtn").addEventListener("click", function () {
+      document.getElementById("fileInput").click();
+    });
+    document.getElementById("fileInput").addEventListener("change", function (event) {
+      var file = event.target.files && event.target.files[0];
+      importFile(file);
+      event.target.value = "";
+    });
+
+    function handlePasteText(instance, clipboardData) {
+      var files = clipboardData.files;
+      if (files && files.length) {
+        importFile(files[0]);
+        return true;
+      }
+      var text = clipboardData.getData("text/plain");
+      if (!text || !text.trim()) return false;
+      var detected = detectFormat(text);
+      if (!detected || detected.format === formatSel.value || detected.score < 8) return false;
+      var whole = instance ? instance.getSelection() === instance.getValue() : true;
+      var empty = instance ? !instance.getValue().trim() : !sourceTextarea.value.trim();
+      if (!whole && !empty) return false;
+      applyImported(detected.format, text, "Detected " + FORMATS[detected.format].label + " from pasted source");
+      return true;
+    }
+
+    function attachPasteHandler(element) {
+      if (!element) return;
+      element.addEventListener("paste", function (event) {
+        var data = event.clipboardData;
+        if (!data) return;
+        if (handlePasteText(editor, data)) event.preventDefault();
+      }, true);
+    }
+    if (editor) attachPasteHandler(editor.getWrapperElement());
+    else attachPasteHandler(sourceTextarea);
+
+    // Exposed for tests and for the console.
+    window.detectDiagramFormat = detectFormat;
+    window.importDiagramSource = applyImported;
 
     themeBtn.addEventListener("click", function () {
       applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true);
