@@ -108,7 +108,7 @@
       justify-content: center;
       border: 1px solid var(--border);
       border-radius: 8px;
-      background: #fff;
+      background: var(--preview-bg, #fff);
       padding: 1rem;
     }
     .preview svg { max-width: 100%; height: auto; }
@@ -229,7 +229,7 @@
       min-height: 14rem;
       max-height: 22rem;
       overflow: auto;
-      background: #fff;
+      background: var(--preview-bg, #fff);
       border: 1px solid var(--border);
       border-radius: 9px;
       padding: 1rem;
@@ -241,12 +241,14 @@
     .rec-preview .hint { color: #6b6a66; }
 
     html[data-theme="dark"] {
+      color-scheme: dark;
       --bg: #12110f;
       --fg: #ece9e2;
       --muted: #a49e93;
       --accent: #a78bfa;
       --card: #1c1b18;
       --border: #35322b;
+      --preview-bg: #1c1b18;
     }
     html[data-theme="dark"] body { background: var(--bg); color: var(--fg); }
     html[data-theme="dark"] .pane,
@@ -286,7 +288,8 @@
     html[data-theme="dark"] .badge.warn { background: #3a2c0d; color: #fbbf24; }
     html[data-theme="dark"] .rec-option .visual { background: #f7f6f3; }
     html[data-theme="dark"] .preview,
-    html[data-theme="dark"] .rec-preview { background: #fff; }
+    html[data-theme="dark"] .rec-preview { background: var(--preview-bg, #1c1b18); }
+    html[data-theme="dark"] .rec-preview .hint { color: #a49e93; }
     html[data-theme="dark"] .modal-backdrop { background: rgba(0, 0, 0, 0.7); }
 
     @media (max-width: 900px) {
@@ -1189,8 +1192,31 @@
       }
     }
 
+    var DARK_BG = "#1c1b18";
+    var DARK_FG = "#ece9e2";
+    var DARK_MUTED = "#a49e93";
+
+    function isDarkMode() {
+      return document.documentElement.dataset.theme === "dark";
+    }
+
+    function appendSvgStyle(svg, css) {
+      var index = svg.lastIndexOf("</svg>");
+      if (index < 0) return svg;
+      return svg.slice(0, index) + "<style>" + css + "</style>" + svg.slice(index);
+    }
+
     async function renderMermaid(text, seq) {
       var mermaid = await getMermaid();
+      var dark = isDarkMode();
+      mermaid.initialize({
+        startOnLoad: false,
+        securityLevel: "strict",
+        theme: dark ? "dark" : "default",
+        htmlLabels: false,
+        fontFamily: "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+        themeVariables: dark ? { background: "transparent" } : {}
+      });
       var id = "diagram-" + seq;
       var result = await mermaid.render(id, text);
       var leftover = document.getElementById(id);
@@ -1210,18 +1236,36 @@
 
     async function renderDot(text) {
       var viz = await getViz();
-      return viz.renderString(text, { format: "svg" });
+      var svg = viz.renderString(text, { format: "svg" });
+      if (isDarkMode()) {
+        svg = svg
+          .replace(/stroke="black"/g, 'stroke="' + DARK_FG + '"')
+          .replace(/fill="black"/g, 'fill="' + DARK_FG + '"')
+          .replace(/fill="white"/g, 'fill="' + DARK_BG + '"');
+      }
+      return svg;
     }
 
     async function renderD2(text) {
       var d2 = await getD2();
-      var compiled = await d2.compile(text);
-      return d2.render(compiled.diagram, compiled.renderOptions);
+      var dark = isDarkMode();
+      var compiled = await d2.compile(text, dark ? { themeID: 200 } : undefined);
+      var svg = await d2.render(compiled.diagram, compiled.renderOptions);
+      if (dark) {
+        // D2 keeps a white page rect behind its dark theme canvas.
+        svg = svg.replace(/fill="white"/g, 'fill="#1E1E2E"');
+      }
+      return svg;
     }
 
     async function renderNomnoml(text) {
       var nomnoml = await getNomnoml();
-      return nomnoml.renderSvg(text);
+      var source = text;
+      if (isDarkMode()) {
+        // Prepended directives act as defaults; the user's own styles win.
+        source = "#background: transparent\n#fill: #2a2824\n#stroke: #ece9e2\n" + text;
+      }
+      return nomnoml.renderSvg(source);
     }
 
     async function renderWaveDrom(text, seq) {
@@ -1238,7 +1282,19 @@
         WaveDrom.RenderWaveForm(0, data, prefix);
         var svg = stage.querySelector("svg");
         if (!svg) throw new Error("WaveDrom did not produce an SVG.");
-        return svg.outerHTML;
+        var markup = svg.outerHTML;
+        if (isDarkMode()) {
+          markup = markup
+            .replace(/fill="white"/g, 'fill="' + DARK_BG + '"')
+            .replace(/fill:\s*white/gi, "fill:" + DARK_BG)
+            .replace(/fill:\s*#fff(?:fff)?/gi, "fill:" + DARK_BG);
+          markup = appendSvgStyle(markup,
+            "text{fill:" + DARK_FG + "}" +
+            ".s1,.s2,.s3,.s4,.s5,.s6,.s7,.s8,.s9{stroke:" + DARK_FG + "}" +
+            ".muted{fill:" + DARK_MUTED + "}" +
+            ".info{fill:#8ab4ff}");
+        }
+        return markup;
       } finally {
         stage.remove();
       }
@@ -1247,6 +1303,24 @@
     async function renderVega(text) {
       var embed = await getVega();
       var spec = JSON.parse(text);
+      if (isDarkMode()) {
+        if (!spec.background) spec.background = "transparent";
+        var darkConfig = {
+          axis: { labelColor: "#c9c5bd", titleColor: DARK_FG, gridColor: "#3a3730", domainColor: "#55514a", tickColor: "#55514a" },
+          legend: { labelColor: "#c9c5bd", titleColor: DARK_FG },
+          title: { color: DARK_FG },
+          view: { stroke: "#3a3730" },
+          text: { fill: DARK_FG }
+        };
+        var userConfig = spec.config && typeof spec.config === "object" ? spec.config : {};
+        var mergedConfig = Object.assign({}, darkConfig, userConfig);
+        Object.keys(darkConfig).forEach(function (key) {
+          if (userConfig[key] && typeof userConfig[key] === "object") {
+            mergedConfig[key] = Object.assign({}, darkConfig[key], userConfig[key]);
+          }
+        });
+        spec.config = mergedConfig;
+      }
       var stage = document.createElement("div");
       stage.style.position = "fixed";
       stage.style.left = "-100000px";
@@ -1264,12 +1338,26 @@
 
     async function renderSvgbob(text) {
       var bob = await getBob();
-      return bob.render(text);
+      var svg = await Promise.resolve(bob.render(text));
+      if (isDarkMode()) {
+        svg = appendSvgStyle(svg.replace(/fill="white"/g, 'fill="' + DARK_BG + '"'),
+          "line,path,circle,rect,polygon{stroke:" + DARK_FG + "}" +
+          ".filled{fill:" + DARK_FG + "}" +
+          ".bg_filled{fill:" + DARK_BG + "}" +
+          "text{fill:" + DARK_FG + "}");
+      }
+      return svg;
     }
 
     async function renderPikchr(text) {
       var pikchr = await getPikchr();
-      return pikchr.render(text);
+      var svg = await Promise.resolve(pikchr.render(text));
+      if (isDarkMode()) {
+        svg = svg
+          .replace(/rgb\(0,\s*0,\s*0\)/g, DARK_FG)
+          .replace(/fill="white"/g, 'fill="' + DARK_BG + '"');
+      }
+      return svg;
     }
 
     async function renderBpmn(text) {
@@ -1312,7 +1400,17 @@
         var style = document.createElementNS("http://www.w3.org/2000/svg", "style");
         style.textContent = css;
         clone.insertBefore(style, clone.firstChild);
-        return clone.outerHTML;
+        var markup = clone.outerHTML;
+        if (isDarkMode()) {
+          markup = markup
+            .replace(/rgb\(34,\s*36,\s*42\)/g, DARK_FG)
+            .replace(/fill="white"/g, 'fill="' + DARK_BG + '"')
+            .replace(/stroke="white"/g, 'stroke="' + DARK_BG + '"')
+            .replace(/fill:\s*white/gi, "fill:" + DARK_BG)
+            .replace(/stroke:\s*white/gi, "stroke:" + DARK_BG)
+            .replace(/fill:\s*#fff(?:fff)?/gi, "fill:" + DARK_BG);
+        }
+        return markup;
       } finally {
         viewer.destroy();
         stage.remove();
@@ -1322,7 +1420,9 @@
     async function renderECharts(text) {
       var echarts = await getECharts();
       var option = JSON.parse(text);
+      var dark = isDarkMode();
       option.animation = false;
+      if (dark && !option.backgroundColor) option.backgroundColor = "transparent";
       var stage = document.createElement("div");
       stage.style.position = "fixed";
       stage.style.left = "-100000px";
@@ -1332,7 +1432,7 @@
       document.body.appendChild(stage);
       var chart;
       try {
-        chart = echarts.init(stage, null, { renderer: "svg", width: 900, height: 600 });
+        chart = echarts.init(stage, dark ? "dark" : null, { renderer: "svg", width: 900, height: 600 });
         chart.setOption(option);
         await new Promise(function (resolve) { setTimeout(resolve, 250); });
         var svg = stage.querySelector("svg");
@@ -1393,7 +1493,13 @@
         svg.setAttribute("width", outWidth);
         svg.setAttribute("height", outHeight);
         svg.setAttribute("preserveAspectRatio", "xMidYMid meet");
-        return svg.outerHTML;
+        var markup = svg.outerHTML;
+        if (isDarkMode()) {
+          markup = appendSvgStyle(markup,
+            ".markmap{--markmap-text-color:#e8e4dc;--markmap-circle-open-bg:#1c1b18;" +
+            "--markmap-code-bg:#2a2824;--markmap-code-color:#e8e4dc;--markmap-highlight-node-bg:#3d3410}");
+        }
+        return markup;
       } finally {
         if (map && map.destroy) map.destroy();
         stage.remove();
@@ -1412,7 +1518,15 @@
         Diagram.parse(text).drawSVG(stage.id, { theme: "simple", "font-family": "sans-serif" });
         var svg = stage.querySelector("svg");
         if (!svg) throw new Error("js-sequence-diagrams did not produce an SVG.");
-        return svg.outerHTML;
+        var markup = svg.outerHTML;
+        if (isDarkMode()) {
+          markup = markup
+            .replace(/#ffffff/gi, DARK_BG)
+            .replace(/#000000/gi, DARK_FG)
+            .replace(/fill="white"/g, 'fill="' + DARK_BG + '"')
+            .replace(/stroke="black"/g, 'stroke="' + DARK_FG + '"');
+        }
+        return markup;
       } finally {
         stage.remove();
       }
@@ -1543,6 +1657,40 @@
       if (examples[index] && examples[index].code !== getSource()) exampleSel.value = "";
     }
 
+    function svgWithBackground(svg, color) {
+      try {
+        var doc = new DOMParser().parseFromString(svg, "image/svg+xml");
+        if (!doc || doc.querySelector("parsererror")) return svg;
+        var root = doc.documentElement;
+        if (!root) return svg;
+        var box = (root.getAttribute("viewBox") || "").trim().split(/[\s,]+/).map(Number);
+        var x = 0, y = 0, width = 0, height = 0;
+        if (box.length === 4 && box.every(function (n) { return isFinite(n); })) {
+          x = box[0]; y = box[1]; width = box[2]; height = box[3];
+        } else {
+          width = parseFloat(root.getAttribute("width")) || 0;
+          height = parseFloat(root.getAttribute("height")) || 0;
+        }
+        if (!width || !height) return svg;
+        var rect = doc.createElementNS("http://www.w3.org/2000/svg", "rect");
+        rect.setAttribute("x", x);
+        rect.setAttribute("y", y);
+        rect.setAttribute("width", width);
+        rect.setAttribute("height", height);
+        rect.setAttribute("fill", color);
+        root.insertBefore(rect, root.firstChild);
+        return new XMLSerializer().serializeToString(root);
+      } catch (e) {
+        return svg;
+      }
+    }
+
+    // Dark exports get a matching background so they stay readable anywhere.
+    function svgForExport() {
+      if (!lastSvg) return "";
+      return isDarkMode() ? svgWithBackground(lastSvg, DARK_BG) : lastSvg;
+    }
+
     function downloadPng() {
       if (!lastSvg) return;
       var blob = new Blob([lastSvg], { type: "image/svg+xml" });
@@ -1557,7 +1705,7 @@
         canvas.width = Math.max(1, Math.round(width * scale));
         canvas.height = Math.max(1, Math.round(height * scale));
         var ctx = canvas.getContext("2d");
-        ctx.fillStyle = "#ffffff";
+        ctx.fillStyle = isDarkMode() ? DARK_BG : "#ffffff";
         ctx.fillRect(0, 0, canvas.width, canvas.height);
         ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
         try {
@@ -1589,13 +1737,21 @@
     var saveTimer = null;
     var recState = { open: false, node: "start", history: [], result: null, parentNode: null, previewSeq: 0 };
 
+    var themeReady = false;
+
     function applyTheme(theme, persist) {
       if (theme !== "dark" && theme !== "light") theme = "light";
+      var changed = document.documentElement.dataset.theme !== theme;
       document.documentElement.dataset.theme = theme;
       themeBtn.textContent = theme === "dark" ? "Light mode" : "Dark mode";
       themeBtn.title = theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
       if (persist) {
         try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* ignore */ }
+      }
+      // Diagrams are rendered with the theme baked in, so re-render on change.
+      if (changed && themeReady) {
+        if (getSource().trim()) render();
+        if (recState.open && recState.result) showRecResult();
       }
     }
 
@@ -2323,11 +2479,11 @@
     });
     document.getElementById("copySvgBtn").addEventListener("click", function () {
       var btn = this;
-      Toolkit.copyText(lastSvg).then(function () { Toolkit.flash(btn, "Copied!"); });
+      Toolkit.copyText(svgForExport()).then(function () { Toolkit.flash(btn, "Copied!"); });
     });
     document.getElementById("downloadSvgBtn").addEventListener("click", function () {
       if (!lastSvg) return;
-      Toolkit.download(new Blob([lastSvg], { type: "image/svg+xml" }), lastFormat + ".svg");
+      Toolkit.download(new Blob([svgForExport()], { type: "image/svg+xml" }), lastFormat + ".svg");
     });
     downloadPngBtn.addEventListener("click", downloadPng);
     liveChk.addEventListener("change", function () {
@@ -2357,6 +2513,7 @@
     applyTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light", false);
     window.addEventListener("beforeunload", saveStateNow);
     restoreState();
+    themeReady = true;
   </script>
 </body>
 </html>

@@ -42,7 +42,7 @@ Simple static web tools that each do one thing. Everything runs locally in your 
 
 | Tool | What it does |
 | --- | --- |
-| [diagram renderer](https://jorisvddonk.github.io/web-tools/diagrams.html) | Render Mermaid, Graphviz DOT, D2, Nomnoml, WaveDrom, Vega-Lite, ECharts, Markmap, BPMN, Svgbob, Pikchr and js-sequence-diagrams locally, with 46 examples, CodeMirror syntax highlighting, dark mode, a guided recommender and SVG/PNG export (SVG only for Markmap/BPMN). Exports embed their source, so an exported SVG or PNG can be dropped back in to restore the diagram; dropped or pasted source text is detected automatically. |
+| [diagram renderer](https://jorisvddonk.github.io/web-tools/diagrams.html) | Render Mermaid, Graphviz DOT, D2, Nomnoml, WaveDrom, Vega-Lite, ECharts, Markmap, BPMN, Svgbob, Pikchr and js-sequence-diagrams locally, with 46 examples, CodeMirror syntax highlighting, dark mode with theme-aware diagram palettes, a guided recommender and SVG/PNG export (SVG only for Markmap/BPMN). Exports embed their source, so an exported SVG or PNG can be dropped back in to restore the diagram; dropped or pasted source text is detected automatically. |
 | [image resizer / converter](https://jorisvddonk.github.io/web-tools/image.html) | Resize, compress and convert images to JPEG, PNG, WebP or AVIF with quality and background controls. |
 | [favicon generator](https://jorisvddonk.github.io/web-tools/favicon.html) | Generate favicon PNGs at common sizes plus a multi-size `favicon.ico`, with an HTML snippet. |
 | [qr code generator / decoder](https://jorisvddonk.github.io/web-tools/qr.html) | Generate styled QR codes and decode QR images, including pasted screenshots. |
