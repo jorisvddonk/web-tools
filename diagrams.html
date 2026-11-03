@@ -5,6 +5,17 @@
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>diagram renderer</title>
   <meta name="description" content="Render Mermaid, Graphviz DOT, D2, Nomnoml, WaveDrom, Vega-Lite, Svgbob, Pikchr and js-sequence-diagrams locally in your browser.">
+  <script>
+    (function () {
+      var stored = null;
+      try { stored = localStorage.getItem("webtools-theme-v1"); } catch (e) { /* ignore */ }
+      if (stored !== "light" && stored !== "dark") {
+        try { stored = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light"; }
+        catch (e) { stored = "light"; }
+      }
+      document.documentElement.dataset.theme = stored;
+    })();
+  </script>
   <link rel="stylesheet" href="./style.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/lib/codemirror.css">
   <script src="https://cdn.jsdelivr.net/npm/codemirror@5.65.18/lib/codemirror.js"></script>
@@ -99,6 +110,136 @@
     .preview .hint { align-self: center; }
     .app-footer { flex: 0 0 auto; font-size: 0.7rem; color: var(--muted); margin: 0; padding: 0 0.2rem; }
 
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      background: rgba(0, 0, 0, 0.55);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+    }
+    .modal-backdrop[hidden] { display: none; }
+    body.modal-open { overflow: hidden !important; }
+    .modal {
+      width: min(980px, 100%);
+      max-height: 90vh;
+      overflow: auto;
+      background: var(--card);
+      color: var(--fg);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1.1rem 1.2rem 1.2rem;
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.3);
+    }
+    .modal-head { display: flex; align-items: flex-start; gap: 0.75rem; }
+    .modal h2 { font-size: 1.25rem; margin: 0; }
+    .rec-crumbs { color: var(--muted); font-size: 0.78rem; margin-top: 0.3rem; }
+    .rec-sub { color: var(--muted); font-size: 0.9rem; margin: 0.5rem 0 0; }
+    .modal-close { margin-left: auto; padding: 0.25rem 0.6rem; font-size: 1.1rem; line-height: 1; }
+    .rec-options {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+      gap: 0.65rem;
+      margin-top: 1rem;
+    }
+    .rec-option {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--fg);
+      border-radius: 10px;
+      padding: 0.7rem;
+      text-align: left;
+      cursor: pointer;
+      font-family: inherit;
+      display: flex;
+      flex-direction: column;
+      gap: 0.3rem;
+    }
+    .rec-option:hover, .rec-option:focus-visible { border-color: var(--accent); box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06); outline: none; }
+    .rec-option .visual {
+      height: 68px;
+      border-radius: 7px;
+      background: #fbfaf8;
+      color: #7c4dff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .rec-option .visual svg { max-width: 94%; max-height: 60px; }
+    .rec-option strong { font-size: 0.92rem; }
+    .rec-option span { color: var(--muted); font-size: 0.78rem; line-height: 1.35; }
+    .modal-actions { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 1rem; align-items: center; }
+    .rec-result h3 { margin: 0.35rem 0 0; font-size: 1.15rem; }
+    .rec-result .why { color: var(--muted); font-size: 0.9rem; margin: 0.4rem 0 0; }
+    .rec-preview {
+      margin-top: 0.85rem;
+      min-height: 14rem;
+      max-height: 22rem;
+      overflow: auto;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .rec-preview svg { max-width: 100%; height: auto; }
+    .rec-preview .hint { color: #6b6a66; }
+
+    html[data-theme="dark"] {
+      --bg: #12110f;
+      --fg: #ece9e2;
+      --muted: #a49e93;
+      --accent: #a78bfa;
+      --card: #1c1b18;
+      --border: #35322b;
+    }
+    html[data-theme="dark"] body { background: var(--bg); color: var(--fg); }
+    html[data-theme="dark"] .pane,
+    html[data-theme="dark"] .modal,
+    html[data-theme="dark"] .rec-option { background: var(--card); }
+    html[data-theme="dark"] .appbar select,
+    html[data-theme="dark"] .appbar input,
+    html[data-theme="dark"] select,
+    html[data-theme="dark"] input[type="text"] {
+      background: #191816;
+      color: var(--fg);
+      border-color: var(--border);
+    }
+    html[data-theme="dark"] button.secondary {
+      background: #24221e;
+      color: var(--fg);
+      border-color: var(--border);
+    }
+    html[data-theme="dark"] .CodeMirror {
+      background: #191816;
+      color: #e8e4dc;
+      border-color: var(--border);
+    }
+    html[data-theme="dark"] .CodeMirror-gutters { background: #151412; border-right-color: var(--border); }
+    html[data-theme="dark"] .CodeMirror-linenumber { color: #706b61; }
+    html[data-theme="dark"] .CodeMirror-activeline-background { background: #242130; }
+    html[data-theme="dark"] .cm-variable { color: #e8e4dc; }
+    html[data-theme="dark"] .cm-keyword { color: #c4b5fd; }
+    html[data-theme="dark"] .cm-string { color: #86efac; }
+    html[data-theme="dark"] .cm-comment { color: #8f8a80; }
+    html[data-theme="dark"] .cm-number { color: #fbbf24; }
+    html[data-theme="dark"] .cm-operator { color: #fca5a5; }
+    html[data-theme="dark"] .cm-bracket { color: #c4b5fd; }
+    html[data-theme="dark"] .badge { background: #2a2342; color: #c4b5fd; }
+    html[data-theme="dark"] .badge.ok { background: #12351f; color: #86efac; }
+    html[data-theme="dark"] .badge.bad { background: #3a1618; color: #fca5a5; }
+    html[data-theme="dark"] .badge.warn { background: #3a2c0d; color: #fbbf24; }
+    html[data-theme="dark"] .rec-option .visual { background: #f7f6f3; }
+    html[data-theme="dark"] .preview,
+    html[data-theme="dark"] .rec-preview { background: #fff; }
+    html[data-theme="dark"] .modal-backdrop { background: rgba(0, 0, 0, 0.7); }
+
     @media (max-width: 900px) {
       body { overflow: auto; }
       main.app { height: auto; min-height: 100dvh; padding: 0.7rem; }
@@ -130,6 +271,8 @@
         </select>
         <label class="appbar-label" for="exampleSel">Example</label>
         <select id="exampleSel" aria-label="Example diagram"></select>
+        <button id="recommendBtn" type="button">Find a diagram</button>
+        <button id="themeBtn" type="button" class="secondary">Dark mode</button>
         <button id="fullscreenBtn" type="button" class="secondary">Fullscreen</button>
       </div>
     </header>
@@ -173,6 +316,20 @@
     </footer>
   </main>
 
+  <div class="modal-backdrop" id="recommenderModal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="recTitle">
+      <div class="modal-head">
+        <div>
+          <h2 id="recTitle">Find the right diagram</h2>
+          <div class="rec-crumbs" id="recCrumbs"></div>
+        </div>
+        <button id="recCloseBtn" type="button" class="secondary modal-close" aria-label="Close">×</button>
+      </div>
+      <div id="recQuestion"></div>
+      <div id="recResult" hidden></div>
+    </div>
+  </div>
+
   <script src="./toolkit.js"></script>
   <script>
     "use strict";
@@ -189,6 +346,14 @@
     var downloadSvgBtn = document.getElementById("downloadSvgBtn");
     var downloadPngBtn = document.getElementById("downloadPngBtn");
     var copySvgBtn = document.getElementById("copySvgBtn");
+    var themeBtn = document.getElementById("themeBtn");
+    var recommendBtn = document.getElementById("recommendBtn");
+    var recommenderModal = document.getElementById("recommenderModal");
+    var recTitle = document.getElementById("recTitle");
+    var recCrumbs = document.getElementById("recCrumbs");
+    var recQuestion = document.getElementById("recQuestion");
+    var recResult = document.getElementById("recResult");
+    var recCloseBtn = document.getElementById("recCloseBtn");
 
     var FORMATS = {
       mermaid: {
@@ -215,6 +380,30 @@
           {
             name: "Gantt chart",
             code: "gantt\n  title Release plan\n  dateFormat YYYY-MM-DD\n  section Design\n  Sketch :a1, 2026-01-05, 5d\n  Review :a2, after a1, 2d\n  section Build\n  Implement :b1, after a2, 10d\n  Test :b2, after b1, 4d"
+          },
+          {
+            name: "State machine",
+            code: "stateDiagram-v2\n  [*] --> Idle\n  Idle --> Running: start\n  Running --> Idle: stop\n  Running --> Failed: error\n  Failed --> Idle: reset\n  Failed --> [*]"
+          },
+          {
+            name: "Pie chart",
+            code: "pie title Requests by status\n  \"200\" : 70\n  \"404\" : 15\n  \"500\" : 5\n  \"other\" : 10"
+          },
+          {
+            name: "Git graph",
+            code: "gitGraph\n  commit id: \"init\"\n  branch feature\n  checkout feature\n  commit id: \"add UI\"\n  commit id: \"add tests\"\n  checkout main\n  merge feature\n  commit id: \"release\""
+          },
+          {
+            name: "Mindmap",
+            code: "mindmap\n  root((Web tools))\n    Data\n      JSON\n      YAML\n      CSV\n    Images\n      Palette\n      QR\n    Diagrams\n      Mermaid\n      Graphviz"
+          },
+          {
+            name: "Timeline",
+            code: "timeline\n  title Release history\n  2024 : Initial tools\n  2025 : Schema tester\n       : Diagram renderer\n  2026 : More tools"
+          },
+          {
+            name: "User journey",
+            code: "journey\n  title Find and use a tool\n  section Find it\n    Open site: 5: User\n    Search: 4: User\n  section Use it\n    Paste input: 3: User\n    Get result: 5: User"
           }
         ]
       },
@@ -376,6 +565,111 @@
       }
     };
 
+    var VISUALS = {
+      flow: '<svg viewBox="0 0 120 60" aria-hidden="true"><rect x="6" y="20" width="34" height="22" rx="4" fill="none" stroke="currentColor" stroke-width="2"/><rect x="80" y="20" width="34" height="22" rx="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M40 31h36" stroke="currentColor" stroke-width="2"/><path d="M72 27l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+      sequence: '<svg viewBox="0 0 120 60" aria-hidden="true"><rect x="14" y="6" width="30" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><rect x="76" y="6" width="30" height="12" rx="2" fill="none" stroke="currentColor" stroke-width="2"/><path d="M29 18v34M91 18v34" stroke="currentColor" stroke-width="2"/><path d="M29 30h62" stroke="currentColor" stroke-width="2"/><path d="M87 26l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+      class: '<svg viewBox="0 0 120 60" aria-hidden="true"><rect x="24" y="6" width="72" height="48" rx="4" fill="none" stroke="currentColor" stroke-width="2"/><path d="M24 22h72M24 36h72" stroke="currentColor" stroke-width="2"/><path d="M34 16h30M34 30h40M34 44h34" stroke="currentColor" stroke-width="2"/></svg>',
+      chart: '<svg viewBox="0 0 120 60" aria-hidden="true"><path d="M12 50h96" stroke="currentColor" stroke-width="2"/><rect x="22" y="30" width="14" height="20" fill="currentColor" opacity="0.7"/><rect x="48" y="18" width="14" height="32" fill="currentColor" opacity="0.7"/><rect x="74" y="24" width="14" height="26" fill="currentColor" opacity="0.7"/></svg>',
+      timeline: '<svg viewBox="0 0 120 60" aria-hidden="true"><path d="M12 30h96" stroke="currentColor" stroke-width="2"/><circle cx="24" cy="30" r="4" fill="currentColor"/><circle cx="50" cy="30" r="4" fill="currentColor"/><circle cx="76" cy="30" r="4" fill="currentColor"/><circle cx="100" cy="30" r="4" fill="currentColor"/><path d="M24 22v-8M76 38v8" stroke="currentColor" stroke-width="2"/></svg>',
+      wave: '<svg viewBox="0 0 120 60" aria-hidden="true"><path d="M10 40V20h20v20h20V20h20v20h20V20h20" fill="none" stroke="currentColor" stroke-width="2"/><path d="M10 50h100" stroke="currentColor" stroke-width="1" stroke-dasharray="3 3"/></svg>',
+      ascii: '<svg viewBox="0 0 120 60" aria-hidden="true"><rect x="18" y="16" width="84" height="28" rx="2" fill="none" stroke="currentColor" stroke-width="2" stroke-dasharray="5 3"/><path d="M30 30h60" stroke="currentColor" stroke-width="2"/><path d="M84 26l4 4-4 4" fill="none" stroke="currentColor" stroke-width="2"/></svg>',
+      table: '<svg viewBox="0 0 120 60" aria-hidden="true"><rect x="12" y="12" width="96" height="36" fill="none" stroke="currentColor" stroke-width="2"/><path d="M12 24h96M12 36h96M44 12v36M76 12v36" stroke="currentColor" stroke-width="2"/></svg>',
+      tree: '<svg viewBox="0 0 120 60" aria-hidden="true"><rect x="45" y="6" width="30" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><rect x="8" y="40" width="28" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><rect x="46" y="40" width="28" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><rect x="84" y="40" width="28" height="14" rx="3" fill="none" stroke="currentColor" stroke-width="2"/><path d="M60 20v10M60 30H22v10M60 30h0v10M60 30h38v10" stroke="currentColor" stroke-width="2"/></svg>'
+    };
+
+    // The recommender is a data-driven decision tree. To add a new format or
+    // sample, add an option with result: { format: "key", example: "Example name" }.
+    // Add a new branch by pointing an option at another node with `next`.
+    var RECOMMENDER = {
+      start: {
+        title: "What are you trying to show?",
+        subtitle: "Pick the closest match and we will narrow it down.",
+        options: [
+          { label: "A flow or architecture", desc: "Boxes, services, steps and dependencies", visual: "flow", next: "flow" },
+          { label: "Messages over time", desc: "Sequence diagrams and conversations", visual: "sequence", next: "sequence" },
+          { label: "Classes or data models", desc: "UML classes, entities and state", visual: "class", next: "model" },
+          { label: "Data or metrics", desc: "Bar, line and scatter charts", visual: "chart", next: "data" },
+          { label: "A schedule or history", desc: "Gantt charts, timelines and journeys", visual: "timeline", next: "time" },
+          { label: "Signals or ASCII art", desc: "Timing waveforms, ASCII boxes and PIC-style blocks", visual: "wave", next: "lowlevel" },
+          { label: "Show every format", desc: "Browse one sample from every renderer", visual: "tree", next: "all" }
+        ]
+      },
+      flow: {
+        title: "What kind of flow?",
+        subtitle: "The right amount of structure depends on the graph.",
+        options: [
+          { label: "General flowchart", desc: "Fast to edit, good for mixed flows and decisions", visual: "flow", result: { format: "mermaid", example: "Architecture flowchart", why: "Mermaid is the quickest way to draw a readable flowchart with shapes, labels and subgraphs." } },
+          { label: "Layered architecture", desc: "Clusters and ranked direction", visual: "tree", result: { format: "dot", example: "Clustered architecture", why: "Graphviz DOT is excellent when the graph structure matters: clusters, ranks and automatic layout." } },
+          { label: "Nested containers", desc: "Group services inside environments", visual: "class", result: { format: "d2", example: "Containers", why: "D2 handles nested containers and declarative connections with very little syntax." } },
+          { label: "PIC-style blocks", desc: "Precise boxes, arrows and labels", visual: "flow", result: { format: "pikchr", example: "Architecture", why: "Pikchr is a concise PIC-like language for precise block diagrams." } },
+          { label: "Quick ASCII boxes", desc: "Plain text that renders as clean SVG", visual: "ascii", result: { format: "svgbob", example: "Boxes", why: "Svgbob lets you keep the diagram as editable ASCII and turns it into SVG." } }
+        ]
+      },
+      sequence: {
+        title: "How detailed is the interaction?",
+        subtitle: "Sequence diagrams can be minimalist or include notes and arrow styles.",
+        options: [
+          { label: "System / API flow", desc: "Participants, calls and responses", visual: "sequence", result: { format: "mermaid", example: "Sequence diagram", why: "Mermaid sequence diagrams support participants, aliases, notes, loops and activation." } },
+          { label: "Minimal conversation", desc: "A few actors and notes", visual: "sequence", result: { format: "sequence", example: "Basic conversation", why: "js-sequence-diagrams is intentionally small and ideal for a quick conversation sketch." } },
+          { label: "Arrow styles and notes", desc: "Solid, dotted and open arrows", visual: "sequence", result: { format: "sequence", example: "Arrow styles and notes", why: "js-sequence-diagrams makes it easy to show solid/dotted and filled/open arrow combinations." } }
+        ]
+      },
+      model: {
+        title: "What kind of model?",
+        subtitle: "Classes, entities and state machines all communicate structure differently.",
+        options: [
+          { label: "Classes and inheritance", desc: "UML class boxes with operations", visual: "class", result: { format: "mermaid", example: "Class diagram", why: "Mermaid class diagrams are readable and support inheritance, abstract classes and methods." } },
+          { label: "Compact UML", desc: "Fast bracket-based class sketches", visual: "class", result: { format: "nomnoml", example: "Class diagram", why: "Nomnoml keeps UML text compact and automatically lays out the boxes." } },
+          { label: "Entities and relationships", desc: "ER diagram with cardinalities", visual: "table", result: { format: "mermaid", example: "Entity relationship", why: "Mermaid's ER diagram syntax expresses entities, attributes and cardinalities compactly." } },
+          { label: "State machine", desc: "States, transitions and events", visual: "flow", result: { format: "mermaid", example: "State machine", why: "Mermaid state diagrams make transition labels and terminal states easy to read." } }
+        ]
+      },
+      data: {
+        title: "What shape is the data?",
+        subtitle: "Vega-Lite renders charts from a JSON specification.",
+        options: [
+          { label: "Compare categories", desc: "Bar chart", visual: "chart", result: { format: "vega", example: "Bar chart", why: "Vega-Lite is a good fit for declarative charts driven by structured data." } },
+          { label: "Change over time", desc: "Line chart", visual: "chart", result: { format: "vega", example: "Line chart", why: "A line chart makes trends and time series easy to scan." } },
+          { label: "Relationship between values", desc: "Scatter plot", visual: "chart", result: { format: "vega", example: "Scatter plot", why: "Scatter plots reveal correlations and outliers in numeric data." } }
+        ]
+      },
+      time: {
+        title: "What kind of timeline?",
+        subtitle: "Schedules, event histories and step-by-step stories use different formats.",
+        options: [
+          { label: "Project schedule", desc: "Tasks, durations and dependencies", visual: "timeline", result: { format: "mermaid", example: "Gantt chart", why: "Mermaid Gantt charts show tasks, dates and dependencies without a separate project tool." } },
+          { label: "Event history", desc: "Milestones in chronological order", visual: "timeline", result: { format: "mermaid", example: "Timeline", why: "Mermaid timelines are a compact way to show milestones by year or period." } },
+          { label: "User journey", desc: "Steps, people and satisfaction", visual: "timeline", result: { format: "mermaid", example: "User journey", why: "Mermaid journey diagrams map stages, actors and satisfaction scores." } },
+          { label: "Authentication sequence", desc: "Time-ordered messages", visual: "sequence", result: { format: "sequence", example: "Authentication flow", why: "A sequence diagram is better than a timeline when the order of messages matters." } }
+        ]
+      },
+      lowlevel: {
+        title: "What level of detail?",
+        subtitle: "Timing diagrams, ASCII art and PIC-style drawings each have a niche.",
+        options: [
+          { label: "Digital timing", desc: "Clocks, buses and signal states", visual: "wave", result: { format: "wavedrom", example: "Bus transaction", why: "WaveDrom is purpose-built for digital timing waveforms from WaveJSON." } },
+          { label: "ASCII boxes", desc: "Editable diagrams made of characters", visual: "ascii", result: { format: "svgbob", example: "Boxes", why: "Svgbob converts ASCII box drawing into crisp SVG while staying diff-friendly." } },
+          { label: "ASCII table", desc: "Text tables that render as diagrams", visual: "table", result: { format: "svgbob", example: "Table", why: "Svgbob handles ASCII tables and produces clean paths." } },
+          { label: "PIC-style blocks", desc: "Precise hardware or system blocks", visual: "flow", result: { format: "pikchr", example: "Box flow", why: "Pikchr gives you precise control over boxes, arrows and labels." } }
+        ]
+      },
+      all: {
+        title: "Browse every format",
+        subtitle: "Pick any renderer to load a complete sample.",
+        options: [
+          { label: "Mermaid", desc: "Flowchart", visual: "flow", result: { format: "mermaid", example: "Architecture flowchart", why: "Mermaid is the most general-purpose text diagram format here." } },
+          { label: "Graphviz DOT", desc: "Clustered graph", visual: "tree", result: { format: "dot", example: "Clustered architecture", why: "Graphviz specializes in automatic graph layout." } },
+          { label: "D2", desc: "Containers", visual: "class", result: { format: "d2", example: "Containers", why: "D2 is a modern declarative diagram language." } },
+          { label: "Nomnoml", desc: "Class sketch", visual: "class", result: { format: "nomnoml", example: "Class diagram", why: "Nomnoml is a compact UML renderer." } },
+          { label: "WaveDrom", desc: "Timing waveform", visual: "wave", result: { format: "wavedrom", example: "Bus transaction", why: "WaveDrom renders WaveJSON timing diagrams." } },
+          { label: "Vega-Lite", desc: "Bar chart", visual: "chart", result: { format: "vega", example: "Bar chart", why: "Vega-Lite renders charts from JSON." } },
+          { label: "Svgbob", desc: "ASCII boxes", visual: "ascii", result: { format: "svgbob", example: "Boxes", why: "Svgbob turns ASCII art into SVG." } },
+          { label: "Pikchr", desc: "PIC-style blocks", visual: "flow", result: { format: "pikchr", example: "Box flow", why: "Pikchr is a PIC-like block diagram language." } },
+          { label: "js-sequence-diagrams", desc: "Conversation", visual: "sequence", result: { format: "sequence", example: "Basic conversation", why: "js-sequence-diagrams is a small, focused sequence renderer." } }
+        ]
+      }
+    };
+
     var previousFormat = "mermaid";
     var editor = null;
     var suppressChange = false;
@@ -489,6 +783,7 @@
       editor.on("change", function () {
         if (!suppressChange) {
           markCustomExample();
+          saveState();
           if (liveChk.checked) schedule();
         }
       });
@@ -497,6 +792,7 @@
       sourceTextarea.style.display = "block";
       sourceTextarea.addEventListener("input", function () {
         markCustomExample();
+        saveState();
         if (liveChk.checked) schedule();
       });
     }
@@ -892,6 +1188,7 @@
       if (index < 0 || index >= examples.length) return;
       exampleSel.value = String(index);
       setSource(examples[index].code);
+      saveState();
       if (doRender) render();
     }
 
@@ -937,6 +1234,320 @@
       image.src = url;
     }
 
+    var THEME_KEY = "webtools-theme-v1";
+    var DIAGRAM_KEY = "webtools-diagram-v1";
+    var restoringState = false;
+    var saveTimer = null;
+    var recState = { open: false, node: "start", history: [], result: null, parentNode: null, previewSeq: 0 };
+
+    function applyTheme(theme, persist) {
+      if (theme !== "dark" && theme !== "light") theme = "light";
+      document.documentElement.dataset.theme = theme;
+      themeBtn.textContent = theme === "dark" ? "Light mode" : "Dark mode";
+      themeBtn.title = theme === "dark" ? "Switch to light mode" : "Switch to dark mode";
+      if (persist) {
+        try { localStorage.setItem(THEME_KEY, theme); } catch (e) { /* ignore */ }
+      }
+    }
+
+    function saveStateNow() {
+      if (restoringState) return;
+      try {
+        var index = exampleSel.value;
+        var exampleName = "";
+        if (index !== "") {
+          var example = FORMATS[formatSel.value].examples[Number(index)];
+          if (example) exampleName = example.name;
+        }
+        localStorage.setItem(DIAGRAM_KEY, JSON.stringify({
+          format: formatSel.value,
+          source: getSource(),
+          exampleIndex: index,
+          exampleName: exampleName,
+          savedAt: Date.now()
+        }));
+      } catch (e) { /* localStorage may be unavailable */ }
+    }
+
+    function saveState() {
+      if (restoringState) return;
+      clearTimeout(saveTimer);
+      saveTimer = setTimeout(saveStateNow, 400);
+    }
+
+    function restoreState() {
+      restoringState = true;
+      var saved = null;
+      try {
+        var raw = localStorage.getItem(DIAGRAM_KEY);
+        if (raw) saved = JSON.parse(raw);
+      } catch (e) { saved = null; }
+
+      var format = saved && FORMATS[saved.format] ? saved.format : "mermaid";
+      formatSel.value = format;
+      setFormat(format);
+
+      if (saved && typeof saved.source === "string") {
+        setSource(saved.source);
+        var index = -1;
+        if (typeof saved.exampleName === "string" && saved.exampleName) {
+          index = FORMATS[format].examples.findIndex(function (example) { return example.name === saved.exampleName; });
+        }
+        if (index === -1) {
+          index = FORMATS[format].examples.findIndex(function (example) { return example.code === saved.source; });
+        }
+        exampleSel.value = index >= 0 ? String(index) : "";
+      } else {
+        loadExample(0, false);
+        exampleSel.value = "0";
+      }
+
+      restoringState = false;
+      setStatus("muted", "rendering…", FORMATS[format].label);
+      render();
+    }
+
+    function recMessage(target, text) {
+      target.innerHTML = "";
+      var message = document.createElement("div");
+      message.className = "hint";
+      message.textContent = text;
+      target.appendChild(message);
+    }
+
+    function updateRecCrumbs() {
+      var labels = ["Start"].concat(recState.history.map(function (step) { return step.label; }));
+      recCrumbs.textContent = labels.join(" › ");
+    }
+
+    function renderRecQuestion() {
+      recState.previewSeq++;
+      recResult.hidden = true;
+      recQuestion.hidden = false;
+      recState.result = null;
+      var node = RECOMMENDER[recState.node];
+      recTitle.textContent = node.title;
+      updateRecCrumbs();
+      recQuestion.innerHTML = "";
+
+      var subtitle = document.createElement("p");
+      subtitle.className = "rec-sub";
+      subtitle.textContent = node.subtitle;
+      recQuestion.appendChild(subtitle);
+
+      var grid = document.createElement("div");
+      grid.className = "rec-options";
+      node.options.forEach(function (option) {
+        var button = document.createElement("button");
+        button.type = "button";
+        button.className = "rec-option";
+        var visual = document.createElement("div");
+        visual.className = "visual";
+        visual.innerHTML = VISUALS[option.visual] || VISUALS.flow;
+        var label = document.createElement("strong");
+        label.textContent = option.label;
+        var desc = document.createElement("span");
+        desc.textContent = option.desc || "";
+        button.appendChild(visual);
+        button.appendChild(label);
+        button.appendChild(desc);
+        button.addEventListener("click", function () { chooseRec(option); });
+        grid.appendChild(button);
+      });
+      recQuestion.appendChild(grid);
+
+      var actions = document.createElement("div");
+      actions.className = "modal-actions";
+      if (recState.history.length) {
+        var back = document.createElement("button");
+        back.type = "button";
+        back.className = "secondary";
+        back.textContent = "← Back";
+        back.addEventListener("click", recBack);
+        actions.appendChild(back);
+      }
+      var restart = document.createElement("button");
+      restart.type = "button";
+      restart.className = "secondary";
+      restart.textContent = "Start over";
+      restart.addEventListener("click", recRestart);
+      actions.appendChild(restart);
+      recQuestion.appendChild(actions);
+    }
+
+    function chooseRec(option) {
+      recState.history.push({ node: recState.node, label: option.label });
+      if (option.next) {
+        recState.node = option.next;
+        renderRecQuestion();
+        return;
+      }
+      if (option.result) {
+        recState.result = option.result;
+        recState.parentNode = recState.node;
+        showRecResult();
+      }
+    }
+
+    function showRecResult() {
+      var result = recState.result;
+      if (!result) return;
+      var format = FORMATS[result.format];
+      var example = format ? format.examples.find(function (item) { return item.name === result.example; }) : null;
+      if (!format) return;
+      if (!example) example = format.examples[0];
+
+      recQuestion.hidden = true;
+      recResult.hidden = false;
+      recResult.innerHTML = "";
+      recTitle.textContent = "Recommended format";
+      updateRecCrumbs();
+
+      var badge = document.createElement("span");
+      badge.className = "badge ok";
+      badge.textContent = "Recommended";
+      var heading = document.createElement("h3");
+      heading.textContent = format.label + " · " + example.name;
+      var why = document.createElement("p");
+      why.className = "why";
+      why.textContent = result.why || "This format fits the choices you made.";
+
+      var previewBox = document.createElement("div");
+      previewBox.className = "rec-preview";
+      previewBox.id = "recPreview";
+      previewBox.textContent = "Rendering preview…";
+
+      var actions = document.createElement("div");
+      actions.className = "modal-actions";
+      var load = document.createElement("button");
+      load.type = "button";
+      load.textContent = "Load sample";
+      load.addEventListener("click", function () { loadRecSample(result); });
+      var back = document.createElement("button");
+      back.type = "button";
+      back.className = "secondary";
+      back.textContent = "← Back";
+      back.addEventListener("click", recBack);
+      var restart = document.createElement("button");
+      restart.type = "button";
+      restart.className = "secondary";
+      restart.textContent = "Start over";
+      restart.addEventListener("click", recRestart);
+      actions.appendChild(load);
+      actions.appendChild(back);
+      actions.appendChild(restart);
+
+      recResult.appendChild(badge);
+      recResult.appendChild(heading);
+      recResult.appendChild(why);
+      recResult.appendChild(previewBox);
+      recResult.appendChild(actions);
+      previewRecommendation(result.format, example, previewBox);
+    }
+
+    function previewRecommendation(format, example, target) {
+      var seq = ++recState.previewSeq;
+      recMessage(target, "Rendering preview…");
+      var run = renderLock.then(function () {
+        if (!recState.open || seq !== recState.previewSeq) return null;
+        return renderFormat(format, example.code, 900000 + seq);
+      });
+      renderLock = run.catch(function () {});
+      run.then(function (svg) {
+        if (!recState.open || seq !== recState.previewSeq || !target.isConnected) return;
+        if (!svg) throw new Error("No preview");
+        target.innerHTML = sanitizeSvg(svg);
+      }).catch(function (e) {
+        if (!recState.open || seq !== recState.previewSeq || !target.isConnected) return;
+        recMessage(target, "Preview unavailable; load the sample to render it. " + (e && e.message ? e.message : ""));
+      });
+    }
+
+    function recBack() {
+      if (recState.result) {
+        recState.result = null;
+        recState.history.pop();
+        recState.node = recState.parentNode;
+        renderRecQuestion();
+        return;
+      }
+      if (recState.history.length) {
+        recState.node = recState.history.pop().node;
+        renderRecQuestion();
+      }
+    }
+
+    function recRestart() {
+      recState.previewSeq++;
+      recState.node = "start";
+      recState.history = [];
+      recState.result = null;
+      recState.parentNode = null;
+      renderRecQuestion();
+    }
+
+    function openRecommender() {
+      recState.open = true;
+      recState.previewSeq++;
+      recState.node = "start";
+      recState.history = [];
+      recState.result = null;
+      recState.parentNode = null;
+      document.body.classList.add("modal-open");
+      recommenderModal.hidden = false;
+      renderRecQuestion();
+      recCloseBtn.focus();
+    }
+
+    function closeRecommender() {
+      recState.open = false;
+      recState.previewSeq++;
+      document.body.classList.remove("modal-open");
+      recommenderModal.hidden = true;
+      recommendBtn.focus();
+    }
+
+    function loadRecSample(result) {
+      var format = FORMATS[result.format];
+      if (!format) return;
+      var index = format.examples.findIndex(function (example) { return example.name === result.example; });
+      if (index < 0) index = 0;
+      closeRecommender();
+      formatSel.value = result.format;
+      setFormat(result.format);
+      loadExample(index, false);
+      exampleSel.value = String(index);
+      saveStateNow();
+      render();
+      if (editor) editor.focus();
+    }
+
+    themeBtn.addEventListener("click", function () {
+      applyTheme(document.documentElement.dataset.theme === "dark" ? "light" : "dark", true);
+    });
+    try {
+      var themeQuery = matchMedia("(prefers-color-scheme: dark)");
+      var onSystemTheme = function (event) {
+        var stored = null;
+        try { stored = localStorage.getItem(THEME_KEY); } catch (e) { /* ignore */ }
+        if (!stored) applyTheme(event.matches ? "dark" : "light", false);
+      };
+      if (themeQuery.addEventListener) themeQuery.addEventListener("change", onSystemTheme);
+      else if (themeQuery.addListener) themeQuery.addListener(onSystemTheme);
+    } catch (e) { /* ignore */ }
+
+    recommendBtn.addEventListener("click", openRecommender);
+    recCloseBtn.addEventListener("click", closeRecommender);
+    recommenderModal.addEventListener("click", function (e) {
+      if (e.target === recommenderModal) closeRecommender();
+    });
+    document.addEventListener("keydown", function (e) {
+      if (e.key === "Escape" && recState.open) {
+        e.preventDefault();
+        closeRecommender();
+      }
+    });
+
     formatSel.addEventListener("change", function () {
       var previousExamples = FORMATS[previousFormat].examples;
       var current = getSource();
@@ -948,6 +1559,7 @@
         exampleSel.value = "";
       }
       setMode(formatSel.value);
+      saveState();
       render();
     });
 
@@ -964,6 +1576,7 @@
       errorEl.textContent = "";
       clearPreview();
       setStatus("muted", "waiting", FORMATS[formatSel.value].label);
+      saveState();
       if (editor) editor.focus();
     });
     document.getElementById("copySvgBtn").addEventListener("click", function () {
@@ -999,10 +1612,9 @@
       fullscreenBtn.textContent = document.fullscreenElement ? "Exit fullscreen" : "Fullscreen";
     });
 
-    setFormat("mermaid");
-    loadExample(0, false);
-    setStatus("muted", "rendering…", "Mermaid");
-    render();
+    applyTheme(document.documentElement.dataset.theme === "dark" ? "dark" : "light", false);
+    window.addEventListener("beforeunload", saveStateNow);
+    restoreState();
   </script>
 </body>
 </html>
