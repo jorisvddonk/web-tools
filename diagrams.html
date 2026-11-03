@@ -50,7 +50,17 @@
     .appbar-label { font-size: 0.8rem; color: var(--muted); font-weight: 600; margin: 0; }
     .appbar select { min-height: 2.2rem; width: auto; padding: 0.2rem 0.5rem; font-family: inherit; }
     .appbar button { padding: 0.35rem 0.7rem; }
-    .format-hint { font-size: 0.78rem; color: var(--muted); min-height: 1.1em; margin: 0; flex: 0 0 auto; }
+    .format-hint { font-size: 0.78rem; color: var(--muted); min-height: 1.1em; margin: 0; flex: 0 0 auto; display: flex; align-items: center; gap: 0.55rem; flex-wrap: wrap; }
+    .format-docs {
+      color: var(--accent);
+      text-decoration: none;
+      border-bottom: 1px dotted currentColor;
+      white-space: nowrap;
+    }
+    .format-docs:hover, .format-docs:focus-visible { text-decoration: underline; border-bottom-color: transparent; }
+    .error a, .rec-docs { color: var(--accent); }
+    .rec-docs { font-size: 0.8rem; font-weight: 500; text-decoration: none; border-bottom: 1px dotted currentColor; margin-left: 0.45rem; white-space: nowrap; }
+    .rec-docs:hover { text-decoration: underline; }
     #error { flex: 0 0 auto; margin: 0; min-height: 0; }
 
     .editor-grid {
@@ -331,7 +341,10 @@
         <button id="fullscreenBtn" type="button" class="secondary">Fullscreen</button>
       </div>
     </header>
-    <div class="format-hint" id="formatHint"></div>
+    <div class="format-hint">
+      <span id="formatHint"></span>
+      <a id="formatDocs" class="format-docs" target="_blank" rel="noopener noreferrer" hidden>Syntax &amp; docs ↗</a>
+    </div>
     <div class="error" id="error" role="alert"></div>
 
     <div class="editor-grid">
@@ -403,6 +416,7 @@
     var sourceTextarea = document.getElementById("source");
     var liveChk = document.getElementById("liveChk");
     var formatHint = document.getElementById("formatHint");
+    var formatDocs = document.getElementById("formatDocs");
     var errorEl = document.getElementById("error");
     var statusBadge = document.getElementById("statusBadge");
     var statusHint = document.getElementById("statusHint");
@@ -423,6 +437,8 @@
     var FORMATS = {
       mermaid: {
         label: "Mermaid",
+        docs: "https://mermaid.js.org/intro/",
+        docsLabel: "Mermaid syntax and docs",
         hint: "Flowcharts, sequence, class, state, ER, gantt, mindmap, gitGraph, timeline and more.",
         mode: "mermaid",
         examples: [
@@ -474,6 +490,8 @@
       },
       dot: {
         label: "Graphviz DOT",
+        docs: "https://graphviz.org/doc/info/lang.html",
+        docsLabel: "Graphviz DOT language docs",
         hint: "Directed or undirected graphs using the DOT language.",
         mode: "dot",
         examples: [
@@ -497,6 +515,8 @@
       },
       d2: {
         label: "D2",
+        docs: "https://d2lang.com/tour/intro",
+        docsLabel: "D2 language docs",
         hint: "Declarative diagram scripting with containers, shapes and connections.",
         mode: "d2",
         examples: [
@@ -516,6 +536,8 @@
       },
       nomnoml: {
         label: "Nomnoml",
+        docs: "https://nomnoml.com/",
+        docsLabel: "Nomnoml syntax reference",
         hint: "UML-style diagrams with a compact bracket syntax.",
         mode: "nomnoml",
         examples: [
@@ -535,6 +557,8 @@
       },
       wavedrom: {
         label: "WaveDrom",
+        docs: "https://wavedrom.com/tutorial.html",
+        docsLabel: "WaveDrom tutorial",
         hint: "Digital timing diagrams described as WaveJSON.",
         mode: { name: "javascript", json: true },
         examples: [
@@ -554,6 +578,8 @@
       },
       vega: {
         label: "Vega-Lite",
+        docs: "https://vega.github.io/vega-lite/docs/",
+        docsLabel: "Vega-Lite documentation",
         hint: "Charts and visualizations from a JSON grammar. Vega specs also work.",
         mode: { name: "javascript", json: true },
         examples: [
@@ -573,6 +599,8 @@
       },
       echarts: {
         label: "ECharts",
+        docs: "https://echarts.apache.org/en/option.html",
+        docsLabel: "ECharts option reference",
         hint: "Charts, networks, sankeys and more from an Apache ECharts JSON option.",
         mode: { name: "javascript", json: true },
         examples: [
@@ -600,6 +628,8 @@
       },
       markmap: {
         label: "Markmap",
+        docs: "https://markmap.js.org/docs",
+        docsLabel: "Markmap documentation",
         hint: "Markdown headings and lists rendered as a mind map.",
         mode: { name: "markdown", xml: true },
         examples: [
@@ -619,6 +649,8 @@
       },
       bpmn: {
         label: "BPMN 2.0",
+        docs: "https://www.omg.org/spec/BPMN/2.0/",
+        docsLabel: "BPMN 2.0 specification",
         hint: "Business process diagrams from BPMN 2.0 XML, rendered with bpmn-js.",
         mode: "xml",
         examples: [
@@ -634,6 +666,8 @@
       },
       svgbob: {
         label: "Svgbob",
+        docs: "https://github.com/ivanceras/svgbob",
+        docsLabel: "Svgbob syntax reference",
         hint: "Turn ASCII art diagrams into clean SVG paths.",
         mode: null,
         examples: [
@@ -653,6 +687,8 @@
       },
       pikchr: {
         label: "Pikchr",
+        docs: "https://pikchr.org/home/doc/trunk/doc/userman.md",
+        docsLabel: "Pikchr user manual",
         hint: "PIC-like diagrams with boxes, arrows, circles and labels.",
         mode: "pikchr",
         examples: [
@@ -672,6 +708,8 @@
       },
       sequence: {
         label: "js-sequence-diagrams",
+        docs: "https://bramp.github.io/js-sequence-diagrams/",
+        docsLabel: "js-sequence-diagrams syntax",
         hint: "Simple sequence diagrams with participants, notes and arrows.",
         mode: "sequence",
         examples: [
@@ -1610,7 +1648,16 @@
         if (seq !== renderSeq) return;
         clearPreview();
         setStatus("bad", "render failed", FORMATS[format].label);
-        errorEl.textContent = e && e.message ? e.message : String(e);
+        errorEl.textContent = "";
+        errorEl.appendChild(document.createTextNode((e && e.message ? e.message : String(e)) + " "));
+        if (FORMATS[format].docs) {
+          var errorLink = document.createElement("a");
+          errorLink.href = FORMATS[format].docs;
+          errorLink.target = "_blank";
+          errorLink.rel = "noopener noreferrer";
+          errorLink.textContent = "Open the " + FORMATS[format].label + " syntax reference ↗";
+          errorEl.appendChild(errorLink);
+        }
       }
     }
 
@@ -1636,6 +1683,15 @@
     function setFormat(format) {
       previousFormat = format;
       formatHint.textContent = FORMATS[format].hint;
+      if (FORMATS[format].docs) {
+        formatDocs.href = FORMATS[format].docs;
+        formatDocs.textContent = (FORMATS[format].docsLabel || FORMATS[format].label) + " ↗";
+        formatDocs.title = FORMATS[format].docsLabel || FORMATS[format].label;
+        formatDocs.hidden = false;
+      } else {
+        formatDocs.hidden = true;
+        formatDocs.removeAttribute("href");
+      }
       document.getElementById("editorHint").textContent = FORMATS[format].mode ? "syntax highlighting active" : "plain text";
       populateExamples(format);
       setMode(format);
@@ -1913,6 +1969,16 @@
       badge.textContent = "Recommended";
       var heading = document.createElement("h3");
       heading.textContent = format.label + " · " + example.name;
+      if (format.docs) {
+        var docsLink = document.createElement("a");
+        docsLink.className = "rec-docs";
+        docsLink.href = format.docs;
+        docsLink.target = "_blank";
+        docsLink.rel = "noopener noreferrer";
+        docsLink.textContent = "Docs ↗";
+        docsLink.title = format.docsLabel || (format.label + " documentation");
+        heading.appendChild(docsLink);
+      }
       var why = document.createElement("p");
       why.className = "why";
       why.textContent = result.why || "This format fits the choices you made.";

@@ -58,6 +58,33 @@ The schema tester uses Ajv for draft-06/07/2019-09/2020-12 and [`@cfworker/json-
 
 Some tools load libraries from a CDN: js-yaml, JSONPath Plus, qrcode, jsQR, Ajv, CodeMirror, Mermaid, Viz.js, D2, nomnoml, WaveDrom, Vega-Lite, ECharts, Markmap, bpmn-js, Svgbob, Pikchr and js-sequence-diagrams. All processing still happens in the browser.
 
+## Diagram formats and syntax references
+
+The diagram renderer links the current format's syntax reference next to its hint line, and a render error offers a link to the same reference. These are the official specs and help pages it points at:
+
+| Format | Renderer | Syntax / help |
+| --- | --- | --- |
+| Mermaid | [mermaid](https://mermaid.js.org/) | <https://mermaid.js.org/intro/> |
+| Graphviz DOT | [Viz.js](https://github.com/mdaines/viz.js) | <https://graphviz.org/doc/info/lang.html> |
+| D2 | [@terrastruct/d2](https://github.com/terrastruct/d2) | <https://d2lang.com/tour/intro> |
+| Nomnoml | [nomnoml](https://github.com/skanaar/nomnoml) | <https://nomnoml.com/> |
+| WaveDrom | [wavedrom](https://github.com/wavedrom/wavedrom) | <https://wavedrom.com/tutorial.html> |
+| Vega-Lite | [vega-embed](https://github.com/vega/vega-embed) | <https://vega.github.io/vega-lite/docs/> |
+| ECharts | [Apache ECharts](https://echarts.apache.org/) | <https://echarts.apache.org/en/option.html> |
+| Markmap | [markmap](https://github.com/markmap/markmap) | <https://markmap.js.org/docs> |
+| BPMN 2.0 | [bpmn-js](https://github.com/bpmn-io/bpmn-js) | <https://www.omg.org/spec/BPMN/2.0/> |
+| Svgbob | [bob-wasm](https://github.com/ivanceras/svgbob) | <https://github.com/ivanceras/svgbob> |
+| Pikchr | [pikchr](https://pikchr.org/) | <https://pikchr.org/home/doc/trunk/doc/userman.md> |
+| js-sequence-diagrams | [js-sequence-diagrams](https://github.com/bramp/js-sequence-diagrams) | <https://bramp.github.io/js-sequence-diagrams/> |
+
+## Diagram renderer usage
+
+- **Themes** — light/dark follows the browser, and the toolbar toggle persists the choice. Diagrams render with matching palettes, so previews and exports stay readable in either theme.
+- **Autosave** — the format, source and selected example are stored in `localStorage` and restored on refresh.
+- **Portable exports** — every exported SVG carries its source in a `<metadata id="webtools-source">` element, and PNGs carry it in a `webtools-source` text chunk. Open…, drag and drop, or paste such a file to restore the diagram.
+- **Format detection** — dropping or pasting source text detects the format (Mermaid, DOT, D2, nomnoml, WaveDrom, Vega-Lite, ECharts, Markmap, BPMN, Svgbob, Pikchr, js-sequence-diagrams) and loads it. Detection only replaces the editor contents when the editor is empty or everything is selected.
+- **Recommender** — "Find a diagram" walks through use cases with visual choices, previews the result and loads the sample.
+
 ## Development
 
 The site is plain static HTML with no build step. Open `index.html` directly, or serve the directory:
